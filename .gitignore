@@ -1,0 +1,99 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# uv
+.venv/
+.python-version.local
+
+# Testing
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+htmlcov/
+
+# Type checking
+.mypy_cache/
+.pyre/
+.pytype/
+.ruff_cache/
+
+# Documentation builds
+site/
+docs/_build/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+
+# Node / web
+web/node_modules/
+web/.svelte-kit/
+web/build/
+web/dist/
+web/.env
+web/.env.local
+
+# clearscript runtime data (user's local library — never commit)
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+data/
+.clearscript/
+projects/
+library/
+embeddings.npy
+embeddings.faiss
+
+# Secrets
+.env
+.env.local
+*.pem
+*.key
+secrets/
+
+# Build artifacts
+*.spec
+PyInstaller/
+pyinstaller-build/
+release/

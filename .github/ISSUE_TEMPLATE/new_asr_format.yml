@@ -1,0 +1,52 @@
+name: New ASR format adapter
+description: Request support for a transcription tool we don't yet handle
+labels: ["enhancement", "ingest"]
+body:
+  - type: input
+    id: tool_name
+    attributes:
+      label: ASR tool name
+      placeholder: "Otter.ai / Sonix / Trint / Rev / etc."
+    validations:
+      required: true
+
+  - type: input
+    id: tool_link
+    attributes:
+      label: Tool homepage / docs
+    validations:
+      required: true
+
+  - type: dropdown
+    id: export_format
+    attributes:
+      label: Export file format(s)
+      multiple: true
+      options:
+        - txt
+        - docx
+        - srt
+        - vtt
+        - json
+        - html
+        - csv
+        - other (please describe)
+    validations:
+      required: true
+
+  - type: textarea
+    id: sample
+    attributes:
+      label: Anonymized sample export
+      description: A small synthetic sample (no PII) so we can write the parser
+      render: text
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Will you contribute the parser?
+      options:
+        - label: I can write the parser and open a PR
+        - label: I'd like someone else to write it

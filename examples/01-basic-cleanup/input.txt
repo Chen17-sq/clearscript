@@ -1,0 +1,23 @@
+[Speaker 1]: 测一下麦, 听得见吗? 听得见.
+[Speaker 2]: 听得见。
+[Speaker 1]: 好的, 那咱们就开始吧。我先简单介绍一下今天的主题, 然后请你介绍一下背景。
+[Speaker 2]: 没问题。
+[Speaker 1]: 好的, 那请你简单介绍一下你之前的工作经历, 以及你在 DeFi 这家公司是做什么的。
+[Speaker 2]: 我基本上最早是在百度做广告算法, 大概差不多三四年, 之后去了一家创业公司做推荐, 头衔是 Head of Recommendation。我们当时我们当时主要是做 ranking 模型这块。后来我去了一家叫 Minus 的公司, 那是一家做 agent 的, 大概有 50 来人, 嗯就是做 scalable 的 leader 的 那种 management 工作。
+[Speaker 1]: 嗯嗯。那你在 DeFi 这家公司主要负责什么?
+[Speaker 2]: 我现在在 DeFi 主要负责底层的搜索能力, 我们有一个产品叫 MAM-9, 就是给 LLM 提供 long-term memory 的, 跟 Tabby 那种公司有点像, 但是定位不同。我们最近也在做 web search 这块, 主要竞品是 Alexa, 也就是行业里的 X。
+[Speaker 1]: 你们大概有多少 ARR? 或者说千次 query 的价格大概是多少?
+[Speaker 2]: 我们目前千次 query 的价格大概是 0.8 元, ARR 我现在不太方便讲具体数字, 反正还在快速增长。我们最近接的几个大客户里, 有一个是 iShopee, 那家公司大家都知道。
+[Speaker 1]: 嗯, 了解。那你们团队现在多大?
+[Speaker 2]: 我们整个公司差不多三四百人吧。技术团队大概接在10% 左右。
+[Speaker 1]: 好的, 那 OpenCloud 你们用得多吗?
+[Speaker 2]: 用得不太多, 我们更多是基于自己搭的 stack, Dust Script 那一套也用了一些。
+[Speaker 1]: 明白了, 谢谢你的时间。我们后续 follow up。
+[Speaker 2]: 好的, 拜拜。
+
+---
+本次访谈总结 (由 ASR 工具自动生成):
+- Speaker 2 在 DeFi 公司负责底层搜索能力
+- 主要产品是 MAM-9, 给 LLM 提供长期记忆
+- 千次 query 价格约 0.8 元
+- 公司规模 300-400 人

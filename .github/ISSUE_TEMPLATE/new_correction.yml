@@ -1,0 +1,59 @@
+name: ASR correction pattern
+description: Suggest an ASR error → correct mapping for the universal pack
+labels: ["library", "good first issue"]
+body:
+  - type: input
+    id: asr_original
+    attributes:
+      label: What ASR wrote (verbatim)
+      placeholder: "Difan"
+    validations:
+      required: true
+
+  - type: input
+    id: correct
+    attributes:
+      label: Correct form
+      placeholder: "Dify"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: type
+    attributes:
+      label: Term type
+      options:
+        - company
+        - product
+        - person
+        - acronym
+        - jargon
+        - place
+        - other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: domain
+    attributes:
+      label: Domain
+      options:
+        - universal (any context)
+        - vc / private equity
+        - ai-infra
+        - consumer / e-commerce
+        - enterprise saas
+        - medical / clinical
+        - legal
+        - hardware
+        - crypto
+        - education
+        - other
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Brief context (why is this a common error?)
+      placeholder: "Speech recognition often hears 'Dify' as 'Difan' due to similar phonemes in Mandarin-accented English."

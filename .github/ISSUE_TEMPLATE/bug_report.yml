@@ -1,0 +1,92 @@
+name: Bug report
+description: Something isn't working as expected
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Please include enough detail that we can reproduce the issue.
+
+  - type: input
+    id: version
+    attributes:
+      label: clearscript version
+      placeholder: "0.0.1 (run `clearscript version`)"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system and Python version
+      placeholder: "macOS 14.5, Python 3.13"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider
+      options:
+        - claude (Anthropic)
+        - openai
+        - openai-compat (DeepSeek / Moonshot / Qwen / Together / Groq / etc.)
+        - google (Gemini)
+        - ollama
+        - custom
+    validations:
+      required: true
+
+  - type: input
+    id: model
+    attributes:
+      label: Model
+      placeholder: "claude-opus-4-7"
+
+  - type: dropdown
+    id: input_format
+    attributes:
+      label: Input format
+      options:
+        - txt
+        - md
+        - docx
+        - srt / vtt
+        - json
+        - feishu-miaoji
+        - typeless
+        - tongyi-tingwu
+        - tencent-meeting
+        - yuanbao
+        - plaud
+        - other (please describe)
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: CLI command or UI action
+      placeholder: "clearscript run interview.txt --provider claude"
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior (include error message / stack trace)
+    validations:
+      required: true
+
+  - type: textarea
+    id: minimal_input
+    attributes:
+      label: Minimal synthetic input that reproduces (anonymized — no real PII)
+      render: text

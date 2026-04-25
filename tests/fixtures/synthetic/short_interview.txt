@@ -1,0 +1,6 @@
+[Speaker 1]: Hi, can you hear me okay?
+[Speaker 2]: Yes, loud and clear.
+[Speaker 1]: Great, can you walk me through your background?
+[Speaker 2]: Sure. I worked at a search company for about 5 years, then moved into a startup focused on AI infra.
+[Speaker 1]: Got it. And your current role?
+[Speaker 2]: I'm leading the platform team, about 30 engineers.

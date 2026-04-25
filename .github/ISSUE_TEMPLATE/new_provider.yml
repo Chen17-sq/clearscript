@@ -1,0 +1,41 @@
+name: New model provider
+description: Request support for a model API we don't yet handle
+labels: ["enhancement", "providers"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Most providers can be added via the existing `openai-compat` adapter — please check
+        whether the provider exposes an OpenAI-compatible endpoint before filing.
+
+  - type: input
+    id: provider_name
+    attributes:
+      label: Provider name
+    validations:
+      required: true
+
+  - type: input
+    id: docs
+    attributes:
+      label: API documentation URL
+    validations:
+      required: true
+
+  - type: dropdown
+    id: api_style
+    attributes:
+      label: API style
+      options:
+        - OpenAI-compatible (works with `openai-compat` adapter)
+        - Native SDK only (needs new adapter)
+        - Local model server
+        - Custom protocol
+    validations:
+      required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything special we should know?
+      description: Auth quirks, rate limits, streaming differences, regional restrictions
