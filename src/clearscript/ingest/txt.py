@@ -31,7 +31,13 @@ class TxtAdapter(IngestAdapter):
 
     def parse(self, path: Path) -> NormalizedTranscript:
         content = path.read_text(encoding="utf-8")
-        return self._parse_text(content, path)
+        return self.parse_string(content, path)
+
+    def parse_string(
+        self, content: str, source_path: Path | None = None
+    ) -> NormalizedTranscript:
+        """Parse raw text content (no file I/O). Used by the web UI for paste-in input."""
+        return self._parse_text(content, source_path)
 
     def _parse_text(self, content: str, path: Path | None) -> NormalizedTranscript:
         segments: list[Segment] = []

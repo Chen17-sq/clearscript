@@ -1,0 +1,506 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>clearscript</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            bg: '#F0F0F0',
+            ink: '#121212',
+            red: '#D02020',
+            blue: '#1040C0',
+            yellow: '#F0C020',
+            muted: '#E0E0E0',
+          },
+          fontFamily: {
+            sans: ['Outfit', 'system-ui', 'sans-serif'],
+            mono: ['JetBrains Mono', 'ui-monospace', 'monospace'],
+          },
+          boxShadow: {
+            'bauhaus-sm': '4px 4px 0 0 #121212',
+            'bauhaus-md': '6px 6px 0 0 #121212',
+            'bauhaus-lg': '8px 8px 0 0 #121212',
+          },
+        },
+      },
+    };
+  </script>
+  <style>
+    body {
+      background-color: #F0F0F0;
+      background-image: radial-gradient(#121212 1.2px, transparent 1.2px);
+      background-size: 22px 22px;
+      background-position: 0 0;
+      color: #121212;
+      font-family: 'Outfit', system-ui, sans-serif;
+    }
+    .bauhaus-press:active {
+      transform: translate(2px, 2px);
+      box-shadow: none !important;
+    }
+    /* scrollbar */
+    .panel-scroll::-webkit-scrollbar { width: 10px; }
+    .panel-scroll::-webkit-scrollbar-track { background: #F0F0F0; border-left: 2px solid #121212; }
+    .panel-scroll::-webkit-scrollbar-thumb { background: #121212; }
+  </style>
+</head>
+<body class="min-h-screen">
+
+  <!-- =========== TOP BAR =========== -->
+  <header class="border-b-4 border-ink bg-bg">
+    <div class="max-w-[1400px] mx-auto px-6 py-4 flex items-center justify-between">
+
+      <div class="flex items-center gap-4">
+        <!-- Geometric logo (inline SVG, three primitives) -->
+        <svg viewBox="0 0 60 60" width="44" height="44" aria-hidden="true">
+          <polygon points="14,46 50,46 32,12" fill="#F0C020" stroke="#121212" stroke-width="3" />
+          <g transform="translate(40 32) rotate(45)">
+            <rect x="-12" y="-12" width="24" height="24" fill="#1040C0" stroke="#121212" stroke-width="3" />
+          </g>
+          <circle cx="20" cy="38" r="13" fill="#D02020" stroke="#121212" stroke-width="3" />
+        </svg>
+        <div class="leading-none">
+          <h1 class="font-black text-3xl tracking-tighter">clearscript</h1>
+          <p class="text-[11px] font-bold tracking-[0.18em] mt-1">LOCAL-FIRST · BYOM · COMPOUNDING LIBRARY</p>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-3">
+        <span id="version" class="text-xs font-bold uppercase tracking-widest text-ink/60">loading…</span>
+        <a href="https://github.com/Chen17-sq/clearscript" target="_blank" rel="noopener"
+           class="bauhaus-press border-2 border-ink bg-white px-4 py-2 text-xs font-bold uppercase tracking-widest shadow-bauhaus-sm hover:bg-yellow transition-colors">
+          GitHub
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- =========== PROVIDER STRIP =========== -->
+  <section class="border-b-4 border-ink bg-yellow">
+    <div class="max-w-[1400px] mx-auto px-6 py-4 flex flex-wrap items-center gap-4">
+      <span class="font-black uppercase tracking-widest text-xs">Provider</span>
+      <div id="provider-pills" class="flex flex-wrap gap-2">
+        <!-- filled by JS -->
+        <span class="text-sm">loading providers…</span>
+      </div>
+      <div class="ml-auto flex items-center gap-3">
+        <label for="model-input" class="font-black uppercase tracking-widest text-xs">Model</label>
+        <input id="model-input"
+          class="border-2 border-ink bg-white px-3 py-2 text-sm font-mono w-72 focus:outline-none focus:shadow-bauhaus-sm"
+          placeholder="(provider default)" />
+      </div>
+    </div>
+  </section>
+
+  <!-- =========== MAIN PANELS =========== -->
+  <main class="max-w-[1400px] mx-auto px-6 py-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+    <!-- ============ INPUT PANEL ============ -->
+    <section class="border-4 border-ink bg-white shadow-bauhaus-lg">
+      <header class="border-b-4 border-ink bg-blue text-white px-5 py-3 flex items-center justify-between">
+        <h2 class="font-black uppercase tracking-widest text-sm">Raw transcript</h2>
+        <div class="flex items-center gap-2">
+          <button id="load-example-btn"
+            class="bauhaus-press border-2 border-ink bg-white text-ink px-3 py-1 text-[11px] font-bold uppercase tracking-widest shadow-bauhaus-sm hover:bg-yellow">
+            Load example
+          </button>
+          <button id="clear-btn"
+            class="bauhaus-press border-2 border-ink bg-white text-ink px-3 py-1 text-[11px] font-bold uppercase tracking-widest shadow-bauhaus-sm hover:bg-yellow">
+            Clear
+          </button>
+        </div>
+      </header>
+
+      <div class="p-5">
+        <!-- Drag-drop affordance -->
+        <div id="drop-zone"
+          class="border-2 border-dashed border-ink/40 px-4 py-3 mb-3 text-center text-xs font-bold uppercase tracking-widest text-ink/70">
+          Drop a .txt file here · or click to upload · or paste below
+          <input type="file" id="file-input" accept=".txt,.md" class="hidden" />
+        </div>
+
+        <textarea id="transcript-input"
+          class="w-full h-[420px] font-mono text-sm border-2 border-ink p-3 bg-bg focus:outline-none focus:shadow-bauhaus-sm resize-none panel-scroll"
+          placeholder="Paste your raw ASR transcript here…&#10;&#10;Example formats supported in v0.0.2:&#10;  Speaker 1: hello there&#10;  [Speaker 2]: hi back&#10;  张三: 你好&#10;  李四: 你好啊"></textarea>
+
+        <div class="mt-4 grid grid-cols-1 gap-3">
+          <input id="title-input" type="text"
+            class="border-2 border-ink px-3 py-2 text-sm bg-white focus:outline-none focus:shadow-bauhaus-sm"
+            placeholder="Optional title (goes at the top of the deliverable)" />
+          <textarea id="briefing-input"
+            class="border-2 border-ink px-3 py-2 text-sm bg-white focus:outline-none focus:shadow-bauhaus-sm resize-none"
+            rows="3"
+            placeholder="Optional briefing — name the speakers, list seed terms (e.g. 'Speaker 1 = Siqi (host); Speaker 2 = Eileen (founder of Acme); seed terms: Dify, Manus, Mem9')"></textarea>
+        </div>
+
+        <div class="mt-5 flex items-center justify-between gap-3">
+          <p id="input-meta" class="text-[11px] font-bold uppercase tracking-widest text-ink/60">0 chars</p>
+          <button id="run-btn"
+            class="bauhaus-press border-4 border-ink bg-red text-white px-8 py-3 text-base font-black uppercase tracking-wider shadow-bauhaus-md hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed">
+            ▶  Clean transcript
+          </button>
+        </div>
+
+        <div id="status"
+          class="mt-4 hidden border-2 border-ink p-3 text-sm font-bold"></div>
+      </div>
+    </section>
+
+    <!-- ============ OUTPUT PANEL ============ -->
+    <section class="border-4 border-ink bg-white shadow-bauhaus-lg">
+      <header class="border-b-4 border-ink bg-red text-white px-5 py-3 flex items-center justify-between">
+        <h2 class="font-black uppercase tracking-widest text-sm">Cleaned output</h2>
+        <div class="flex items-center gap-2">
+          <button id="copy-btn"
+            class="bauhaus-press border-2 border-ink bg-white text-ink px-3 py-1 text-[11px] font-bold uppercase tracking-widest shadow-bauhaus-sm hover:bg-yellow disabled:opacity-40"
+            disabled>
+            Copy MD
+          </button>
+          <button id="download-md-btn"
+            class="bauhaus-press border-2 border-ink bg-white text-ink px-3 py-1 text-[11px] font-bold uppercase tracking-widest shadow-bauhaus-sm hover:bg-yellow disabled:opacity-40"
+            disabled>
+            ↓ .md
+          </button>
+          <button id="download-docx-btn"
+            class="bauhaus-press border-2 border-ink bg-yellow text-ink px-3 py-1 text-[11px] font-bold uppercase tracking-widest shadow-bauhaus-sm hover:opacity-90 disabled:opacity-40"
+            disabled>
+            ↓ .docx
+          </button>
+        </div>
+      </header>
+
+      <div class="p-5">
+        <div id="output-preview"
+          class="font-mono text-sm w-full h-[420px] border-2 border-ink bg-bg p-3 overflow-auto whitespace-pre-wrap break-words panel-scroll text-ink/40">
+          Cleaned transcript appears here after you click "Clean transcript".
+        </div>
+
+        <!-- Stats row -->
+        <div class="mt-4 grid grid-cols-4 gap-3 text-center">
+          <div class="border-2 border-ink bg-white px-3 py-2">
+            <div class="text-[10px] font-bold uppercase tracking-widest text-ink/60">In</div>
+            <div id="stat-in" class="font-mono font-black text-lg">—</div>
+          </div>
+          <div class="border-2 border-ink bg-white px-3 py-2">
+            <div class="text-[10px] font-bold uppercase tracking-widest text-ink/60">Out</div>
+            <div id="stat-out" class="font-mono font-black text-lg">—</div>
+          </div>
+          <div class="border-2 border-ink bg-white px-3 py-2">
+            <div class="text-[10px] font-bold uppercase tracking-widest text-ink/60">Changes</div>
+            <div id="stat-changes" class="font-mono font-black text-lg">—</div>
+          </div>
+          <div class="border-2 border-ink bg-yellow px-3 py-2">
+            <div class="text-[10px] font-bold uppercase tracking-widest text-ink/80">Latency</div>
+            <div id="stat-time" class="font-mono font-black text-lg">—</div>
+          </div>
+        </div>
+
+        <!-- Change log accordion -->
+        <details class="mt-4 border-2 border-ink bg-white">
+          <summary class="cursor-pointer px-4 py-2 font-bold uppercase tracking-widest text-xs bg-bg select-none">
+            Change log <span id="changelog-count" class="ml-2 text-ink/60 font-mono">(0)</span>
+          </summary>
+          <pre id="changelog-pre"
+            class="font-mono text-xs p-4 max-h-[280px] overflow-auto panel-scroll whitespace-pre-wrap"></pre>
+        </details>
+      </div>
+    </section>
+  </main>
+
+  <!-- =========== FOOTER =========== -->
+  <footer class="border-t-4 border-ink bg-ink text-bg mt-8">
+    <div class="max-w-[1400px] mx-auto px-6 py-5 flex flex-wrap gap-4 items-center justify-between text-xs font-bold uppercase tracking-widest">
+      <div class="flex items-center gap-3">
+        <span class="inline-block w-3 h-3 bg-red border border-bg"></span>
+        <span class="inline-block w-3 h-3 bg-blue border border-bg"></span>
+        <span class="inline-block w-3 h-3 bg-yellow border border-bg"></span>
+        <span class="ml-2">No telemetry. No cloud. Your data stays here.</span>
+      </div>
+      <div class="opacity-60">v0.0.2 · MIT · github.com/Chen17-sq/clearscript</div>
+    </div>
+  </footer>
+
+  <!-- =========== APP LOGIC =========== -->
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const state = {
+      providers: [],
+      defaultProvider: null,
+      selectedProvider: null,
+      lastResult: null,
+    };
+
+    function setStatus(msg, kind = 'info') {
+      const el = $('status');
+      el.classList.remove('hidden', 'bg-red', 'bg-yellow', 'bg-blue', 'bg-white', 'text-white', 'text-ink');
+      const styleMap = {
+        info: ['bg-blue', 'text-white'],
+        warn: ['bg-yellow', 'text-ink'],
+        error: ['bg-red', 'text-white'],
+        ok: ['bg-white', 'text-ink'],
+      };
+      styleMap[kind].forEach((c) => el.classList.add(c));
+      el.textContent = msg;
+    }
+
+    function hideStatus() { $('status').classList.add('hidden'); }
+
+    function pillFor(p, isSelected) {
+      const wrap = document.createElement('button');
+      wrap.type = 'button';
+      const baseClasses = 'bauhaus-press border-2 border-ink px-4 py-2 text-xs font-bold uppercase tracking-widest shadow-bauhaus-sm transition-all';
+      if (isSelected) {
+        wrap.className = `${baseClasses} bg-ink text-white`;
+      } else if (!p.has_key) {
+        wrap.className = `${baseClasses} bg-white text-ink/40 cursor-not-allowed`;
+      } else {
+        wrap.className = `${baseClasses} bg-white text-ink hover:bg-yellow`;
+      }
+      const dotColor = { anthropic: 'bg-red', openai: 'bg-blue', 'openai-compat': 'bg-blue', google: 'bg-yellow', ollama: 'bg-white border border-ink' }[p.type] || 'bg-ink';
+      wrap.innerHTML = `<span class="inline-block w-2 h-2 ${dotColor} mr-2 align-middle"></span>${p.name}${p.has_key ? '' : ' ✗'}`;
+      wrap.title = p.has_key ? `${p.type} · default: ${p.default_model || '(set in --model)'}` : `Set ${p.key_env} env var to enable`;
+      if (p.has_key) {
+        wrap.addEventListener('click', () => selectProvider(p.name));
+      }
+      return wrap;
+    }
+
+    function selectProvider(name) {
+      state.selectedProvider = name;
+      const p = state.providers.find((x) => x.name === name);
+      if (p && p.default_model) {
+        $('model-input').placeholder = p.default_model;
+      }
+      renderPills();
+      hideStatus();
+    }
+
+    function renderPills() {
+      const container = $('provider-pills');
+      container.innerHTML = '';
+      state.providers.forEach((p) => {
+        container.appendChild(pillFor(p, p.name === state.selectedProvider));
+      });
+    }
+
+    async function loadProviders() {
+      try {
+        const res = await fetch('/api/providers');
+        const data = await res.json();
+        state.providers = data.providers;
+        state.defaultProvider = data.default;
+        const haveKey = state.providers.find((p) => p.has_key);
+        state.selectedProvider = (haveKey && haveKey.name) || data.default;
+        renderPills();
+        const firstReady = state.providers.find((p) => p.has_key);
+        if (!firstReady) {
+          setStatus('No provider has an API key set yet. Set one of: ' + state.providers.map((p) => p.key_env).filter(Boolean).join(' / '), 'warn');
+        }
+      } catch (e) {
+        setStatus('Failed to load providers: ' + e.message, 'error');
+      }
+    }
+
+    async function loadVersion() {
+      try {
+        const res = await fetch('/api/health');
+        const data = await res.json();
+        $('version').textContent = 'v' + data.version;
+      } catch (e) {
+        $('version').textContent = 'offline';
+      }
+    }
+
+    async function loadExample() {
+      const res = await fetch('/api/example');
+      const data = await res.json();
+      if (data.transcript) {
+        $('transcript-input').value = data.transcript;
+        updateInputMeta();
+        setStatus('Example loaded. Click "Clean transcript" to try it.', 'info');
+      }
+    }
+
+    function updateInputMeta() {
+      const t = $('transcript-input').value;
+      const chars = t.length;
+      const lines = t.split('\n').filter((l) => l.trim()).length;
+      $('input-meta').textContent = `${chars.toLocaleString()} chars · ${lines} lines`;
+    }
+
+    function setRunning(on) {
+      const btn = $('run-btn');
+      btn.disabled = on;
+      btn.innerHTML = on ? '<span class="inline-block animate-pulse">⏳ Running…</span>' : '▶  Clean transcript';
+    }
+
+    async function runPipeline() {
+      const transcript = $('transcript-input').value.trim();
+      if (!transcript) {
+        setStatus('Paste or upload a transcript first.', 'warn');
+        return;
+      }
+      if (!state.selectedProvider) {
+        setStatus('Pick a provider with an API key set.', 'warn');
+        return;
+      }
+
+      hideStatus();
+      setRunning(true);
+      $('output-preview').textContent = 'Working… (this can take 10–60 seconds depending on transcript length and chosen model)';
+      $('output-preview').classList.add('text-ink/40');
+
+      const t0 = performance.now();
+      try {
+        const res = await fetch('/api/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            transcript,
+            provider: state.selectedProvider,
+            model: $('model-input').value.trim() || null,
+            title: $('title-input').value.trim() || null,
+            briefing: $('briefing-input').value.trim() || null,
+          }),
+        });
+        const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ detail: res.statusText }));
+          setStatus('Failed: ' + (err.detail || res.statusText), 'error');
+          $('output-preview').textContent = '';
+          return;
+        }
+        const data = await res.json();
+        state.lastResult = data;
+        renderResult(data, elapsed);
+        setStatus(`Done in ${elapsed}s · ${data.input_tokens + data.output_tokens} tokens · ${data.change_log.length} changes`, 'ok');
+      } catch (e) {
+        setStatus('Network error: ' + e.message, 'error');
+      } finally {
+        setRunning(false);
+      }
+    }
+
+    function renderResult(data, elapsed) {
+      $('output-preview').textContent = data.edited_markdown;
+      $('output-preview').classList.remove('text-ink/40');
+      $('stat-in').textContent = data.input_tokens.toLocaleString();
+      $('stat-out').textContent = data.output_tokens.toLocaleString();
+      $('stat-changes').textContent = data.change_log.length.toLocaleString();
+      $('stat-time').textContent = elapsed + 's';
+      $('changelog-count').textContent = `(${data.change_log.length})`;
+      $('changelog-pre').textContent = data.change_log.length
+        ? JSON.stringify(data.change_log, null, 2)
+        : '(no structured changes returned)';
+      ['copy-btn', 'download-md-btn', 'download-docx-btn'].forEach((id) => { $(id).disabled = false; });
+    }
+
+    function downloadBlob(blob, filename) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    async function downloadDocx() {
+      if (!state.lastResult) return;
+      const res = await fetch('/api/export/docx', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ markdown: state.lastResult.edited_markdown, title: $('title-input').value.trim() || null }),
+      });
+      if (!res.ok) {
+        setStatus('docx export failed: ' + res.statusText, 'error');
+        return;
+      }
+      const blob = await res.blob();
+      downloadBlob(blob, 'clearscript-output.docx');
+    }
+
+    function downloadMd() {
+      if (!state.lastResult) return;
+      const title = $('title-input').value.trim();
+      const body = title ? `# ${title}\n\n${state.lastResult.edited_markdown}\n` : state.lastResult.edited_markdown + '\n';
+      downloadBlob(new Blob([body], { type: 'text/markdown' }), 'clearscript-output.md');
+    }
+
+    async function copyMd() {
+      if (!state.lastResult) return;
+      try {
+        await navigator.clipboard.writeText(state.lastResult.edited_markdown);
+        setStatus('Markdown copied to clipboard.', 'ok');
+        setTimeout(hideStatus, 2000);
+      } catch (e) {
+        setStatus('Copy failed: ' + e.message, 'error');
+      }
+    }
+
+    function clearAll() {
+      $('transcript-input').value = '';
+      $('output-preview').textContent = 'Cleaned transcript appears here after you click "Clean transcript".';
+      $('output-preview').classList.add('text-ink/40');
+      $('changelog-pre').textContent = '';
+      $('changelog-count').textContent = '(0)';
+      ['stat-in', 'stat-out', 'stat-changes', 'stat-time'].forEach((id) => { $(id).textContent = '—'; });
+      ['copy-btn', 'download-md-btn', 'download-docx-btn'].forEach((id) => { $(id).disabled = true; });
+      state.lastResult = null;
+      hideStatus();
+      updateInputMeta();
+    }
+
+    // ============ wiring ============
+    document.addEventListener('DOMContentLoaded', () => {
+      loadVersion();
+      loadProviders();
+
+      $('transcript-input').addEventListener('input', updateInputMeta);
+      $('run-btn').addEventListener('click', runPipeline);
+      $('clear-btn').addEventListener('click', clearAll);
+      $('load-example-btn').addEventListener('click', loadExample);
+      $('copy-btn').addEventListener('click', copyMd);
+      $('download-md-btn').addEventListener('click', downloadMd);
+      $('download-docx-btn').addEventListener('click', downloadDocx);
+
+      // file upload
+      $('drop-zone').addEventListener('click', () => $('file-input').click());
+      $('file-input').addEventListener('change', (e) => {
+        const f = e.target.files[0];
+        if (!f) return;
+        const reader = new FileReader();
+        reader.onload = () => { $('transcript-input').value = reader.result; updateInputMeta(); };
+        reader.readAsText(f);
+      });
+      ['dragover', 'dragenter'].forEach((evt) => $('drop-zone').addEventListener(evt, (e) => { e.preventDefault(); $('drop-zone').classList.add('bg-yellow'); }));
+      ['dragleave', 'drop'].forEach((evt) => $('drop-zone').addEventListener(evt, (e) => { e.preventDefault(); $('drop-zone').classList.remove('bg-yellow'); }));
+      $('drop-zone').addEventListener('drop', (e) => {
+        e.preventDefault();
+        const f = e.dataTransfer.files[0];
+        if (!f) return;
+        const reader = new FileReader();
+        reader.onload = () => { $('transcript-input').value = reader.result; updateInputMeta(); };
+        reader.readAsText(f);
+      });
+
+      // keyboard: cmd/ctrl+enter to run
+      $('transcript-input').addEventListener('keydown', (e) => {
+        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+          e.preventDefault();
+          runPipeline();
+        }
+      });
+    });
+  </script>
+</body>
+</html>

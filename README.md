@@ -90,7 +90,20 @@ clearscript is the third option:
 git clone https://github.com/Chen17-sq/clearscript.git
 cd clearscript
 uv sync
-export ANTHROPIC_API_KEY=sk-ant-...
+export ANTHROPIC_API_KEY=sk-ant-...   # or DEEPSEEK_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY
+```
+
+### Option 1 — Web UI (recommended)
+
+```bash
+uv run clearscript serve
+```
+
+Opens **http://127.0.0.1:7681** in your browser. Bauhaus-styled single-page interface: pick a provider pill, paste or drag in your transcript, click **Clean transcript**, download as `.md` / `.docx`.
+
+### Option 2 — CLI
+
+```bash
 uv run clearscript run examples/01-basic-cleanup/input.txt --provider claude
 ```
 

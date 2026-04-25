@@ -2,6 +2,7 @@
 
 ::
 
+    clearscript serve [--host 127.0.0.1] [--port 7681] [--no-open]
     clearscript run <input> [--provider claude] [--model claude-opus-4-7] [--out path]
     clearscript providers
     clearscript lib stats
@@ -42,6 +43,26 @@ err_console = Console(stderr=True)
 def version() -> None:
     """Show version."""
     console.print(f"clearscript [bold]{__version__}[/bold]")
+
+
+@app.command()
+def serve(
+    host: str = typer.Option(
+        "127.0.0.1", "--host", "-h", help="Host to bind. Default 127.0.0.1 (local only)."
+    ),
+    port: int = typer.Option(7681, "--port", "-P", help="Port to listen on."),
+    no_open: bool = typer.Option(False, "--no-open", help="Don't auto-open the browser."),
+) -> None:
+    """Start the local web UI at http://127.0.0.1:7681 (default)."""
+    from clearscript.server import serve as run_server
+
+    console.print(f"[bold]clearscript[/bold] [dim]v{__version__}[/dim]")
+    console.print(f"Open in your browser: [bold]http://{host}:{port}[/bold]")
+    console.print("Press Ctrl+C to stop.\n")
+    try:
+        run_server(host=host, port=port, open_browser=not no_open)
+    except KeyboardInterrupt:
+        console.print("\n[dim]Server stopped.[/dim]")
 
 
 @app.command()

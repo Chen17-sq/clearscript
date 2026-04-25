@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.2] - 2026-04-25
+
+### Added
+
+- **Local web UI** at `http://127.0.0.1:7681`, launched via `clearscript serve`
+  - Bauhaus-styled single-page app (Tailwind via CDN, Outfit font, hard offset shadows, primary color blocking)
+  - Provider pill selector with live API-key detection
+  - Drag-drop / paste / file-upload transcript input
+  - Per-run stats (input tokens, output tokens, change count, latency)
+  - Inline change-log accordion
+  - One-click download as `.md` or `.docx`, one-click clipboard copy
+  - "Load example" button for first-run users
+  - Cmd/Ctrl+Enter keyboard shortcut to trigger a run
+- FastAPI backend with JSON API: `/api/health`, `/api/providers`, `/api/run`, `/api/export/docx`, `/api/example`
+- Auto-open browser on `clearscript serve` (suppress with `--no-open`)
+- `TxtAdapter.parse_string()` public method for in-memory input
+
+### Changed
+
+- Server binds to `127.0.0.1` only by default (no network exposure unless explicitly opted in)
+- `clearscript` package version bumped to `0.0.2`
+
 ### Planned for v0.1.0
 
 - Full pipeline (Ingest → Pre-scan → Context Briefing → L1-L6 + L3.5 → Self-review → Batch-ask → Re-scan → Export)

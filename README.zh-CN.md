@@ -90,7 +90,20 @@ clearscript 是第三条路：
 git clone https://github.com/Chen17-sq/clearscript.git
 cd clearscript
 uv sync
-export ANTHROPIC_API_KEY=sk-ant-...
+export ANTHROPIC_API_KEY=sk-ant-...   # 或 DEEPSEEK_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY
+```
+
+### 方式一 —— Web UI（推荐）
+
+```bash
+uv run clearscript serve
+```
+
+自动打开 **http://127.0.0.1:7681**。Bauhaus 风格单页界面：选 provider，贴稿子或拖文件，点"Clean transcript"，下载 `.md` / `.docx`。
+
+### 方式二 —— CLI
+
+```bash
 uv run clearscript run examples/01-basic-cleanup/input.txt --provider claude
 ```
 
