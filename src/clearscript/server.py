@@ -45,18 +45,37 @@ _FORMAT_ADAPTERS = {
 }
 
 
-# Mic-check / pleasantry phrases that should NOT become project slugs.
+# Opening / mic-check phrases that should NOT become project slugs.
+# Matched as a STARTSWITH check (not substring) so we catch "好的, 那咱们就
+# 开始吧。我先简单介绍一下..." even though the line is long.
 _PLEASANTRY_PATTERNS = (
     "测",  # 测一下麦 / 测试
     "听得见",
     "听不听得见",
     "能听见",
     "可以听到",
+    "好的",  # 好的, 那咱们就开始吧
+    "那咱们",  # 那咱们就开始吧
+    "我先",  # 我先简单介绍一下
+    "请",  # 请你简单介绍一下
+    "没问题",
+    "嗯",  # 嗯嗯
+    "对",  # 对对对
     "hello",
-    "hi",
+    "hi ",
+    "hi.",
+    "hi!",
     "can you hear",
     "test",
-    "好的",  # 太通用
+    "okay",
+    "ok ",
+    "ok.",
+    "ok,",
+    "let me",
+    "let's",
+    "could you",
+    "would you",
+    "first of all",
 )
 
 
@@ -66,10 +85,18 @@ def _sse_format(event_name: str, data: dict) -> str:
 
 
 def _looks_like_pleasantry(text: str) -> bool:
+    """Return True if `text` looks like a transcript opener / mic check / chitchat.
+
+    We're aggressive on purpose — over-rejecting lines just falls through to
+    "transcript" as the slug fallback, which is better than ending up with
+    "好的-那咱们就开始吧-我先简单介绍一下今天的主题".
+
+    Rule: STARTSWITH any pleasantry pattern OR shorter than 6 chars.
+    """
     lower = text.lower().strip()
     if len(lower) < 6:
         return True
-    return any(p in lower for p in _PLEASANTRY_PATTERNS) and len(lower) <= 30
+    return any(lower.startswith(p) for p in _PLEASANTRY_PATTERNS)
 
 
 def _slug_hint_from_input(

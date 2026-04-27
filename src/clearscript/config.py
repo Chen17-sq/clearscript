@@ -90,12 +90,17 @@ def _builtin_providers() -> dict[str, ProviderConfig]:
             type="openai-compat",
             base_url="https://api.deepseek.com/v1",
             api_key_env="DEEPSEEK_API_KEY",
-            default_model="deepseek-v4-pro",
-            # As of 2026-04, DeepSeek's API exposes v4-pro (flagship) and
-            # v4-flash (cheaper). Older v3 names (deepseek-chat,
-            # deepseek-reasoner) may still resolve as aliases on the API
-            # but no longer appear in /v1/models.
-            models=["deepseek-v4-pro", "deepseek-v4-flash"],
+            # v4-flash is the default: it streams tokens smoothly so the UI
+            # shows live output. v4-pro is a reasoning model — it thinks
+            # silently for tens of seconds before emitting any content,
+            # which makes the streaming UI look frozen. Use pro explicitly
+            # via --model when you want the extra quality.
+            default_model="deepseek-v4-flash",
+            # As of 2026-04, DeepSeek's API exposes v4-pro (flagship,
+            # reasoning) and v4-flash (faster, non-reasoning). Older v3
+            # names (deepseek-chat, deepseek-reasoner) may still resolve
+            # as aliases on the API but no longer appear in /v1/models.
+            models=["deepseek-v4-flash", "deepseek-v4-pro"],
         ),
         "gemini": ProviderConfig(
             name="gemini",

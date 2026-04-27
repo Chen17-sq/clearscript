@@ -816,8 +816,12 @@
                 break;
               }
               case 'chunk_start': {
-                $('progress-label').textContent = `Chunk ${event.data.chunk} of ${event.data.total} — calling model…`;
+                $('progress-label').textContent = `Chunk ${event.data.chunk} of ${event.data.total} — calling model… (reasoning models like deepseek-v4-pro pause here while thinking; use v4-flash for live token streaming)`;
                 $('progress-counter').textContent = `${event.data.chunk} / ${event.data.total}`;
+                // Pulse the progress fill so it doesn't look frozen during the silent thinking phase.
+                $('progress-fill').classList.add('animate-pulse');
+                // Switch output panel to Edit view automatically so the user sees text appear.
+                if (typeof setOutputView === 'function') setOutputView('edit');
                 break;
               }
               case 'chunk_delta': {
@@ -831,7 +835,8 @@
                 ta.value += (event.data.delta || '');
                 ta.scrollTop = ta.scrollHeight;
                 $('progress-tokens-out').textContent = `${(event.data.chars_so_far || 0).toLocaleString()} chars`;
-                $('progress-label').textContent = `Chunk ${event.data.chunk} of ${event.data.total} — receiving…`;
+                $('progress-label').textContent = `Chunk ${event.data.chunk} of ${event.data.total} — receiving (${(event.data.chars_so_far || 0).toLocaleString()} chars)`;
+                $('progress-fill').classList.remove('animate-pulse');
                 break;
               }
               case 'chunk_done': {

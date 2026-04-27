@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.10] - 2026-04-27
+
+### Fixed — Streaming UX with reasoning models
+
+User reported "没有流式" on v0.0.9: the streaming UI looked frozen for nearly the full run. Root cause: ``deepseek-v4-pro`` is a reasoning model that thinks silently for 30–90 seconds before emitting any content tokens. The backend SSE pipeline was correct (first byte at 31ms, deltas confirmed over the wire), but with v4-pro the deltas all arrive in a late burst — so the user reasonably perceived "no streaming".
+
+- DeepSeek default model changed from ``deepseek-v4-pro`` to ``deepseek-v4-flash``. Flash streams tokens smoothly so the live output panel fills in word-by-word, which is what the streaming UI was designed for. Pro is still available — pass ``--model deepseek-v4-pro`` (CLI) or set it in the Model field (web UI) when you want the extra reasoning quality and don't mind the silent thinking phase.
+- Progress label during ``chunk_start`` now explicitly says reasoning models pause here, with a hint to use v4-flash for live streaming. The progress bar pulses while waiting for the first token so it doesn't look frozen.
+- On the first ``chunk_delta`` the output panel auto-switches to Edit view so the streaming text is visible (previously, if the user had Diff view active when a previous run ended, deltas appended to a hidden textarea).
+
 ## [0.0.9] - 2026-04-26
 
 ### Three concrete user complaints, three concrete fixes
