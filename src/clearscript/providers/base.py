@@ -48,6 +48,18 @@ class LLMProvider(Protocol):
         """Stream response chunks (text deltas)."""
         ...
 
+    def chat_with_progress(
+        self, messages: list[ChatMessage], model: str, **kwargs: object
+    ) -> Iterator[tuple[str, object]]:
+        """Stream ``("delta", str)`` events, then a single ``("done", ChatResponse)``.
+
+        The pipeline drives chunks through this method so the UI can show
+        text appearing live. The terminal ``done`` event carries real usage
+        counts when the SDK provides them; ``_BaseProvider`` falls back to
+        an estimate.
+        """
+        ...
+
 
 class _BaseProvider:
     """Helper base for adapters that want a default ``stream`` impl built on ``chat``."""

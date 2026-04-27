@@ -7,7 +7,7 @@
 <p align="center">
   <a href="./LICENSE"><img src="https://img.shields.io/badge/协议-MIT-D02020?style=for-the-badge&labelColor=121212" alt="MIT License"></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/PYTHON-3.11+-1040C0?style=for-the-badge&labelColor=121212" alt="Python 3.11+"></a>
-  <a href="https://github.com/Chen17-sq/clearscript/releases"><img src="https://img.shields.io/badge/版本-0.0.7-F0C020?style=for-the-badge&labelColor=121212" alt="v0.0.7"></a>
+  <a href="https://github.com/Chen17-sq/clearscript/releases"><img src="https://img.shields.io/badge/版本-0.0.10-F0C020?style=for-the-badge&labelColor=121212" alt="v0.0.10"></a>
   <a href="https://github.com/Chen17-sq/clearscript/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Chen17-sq/clearscript/ci.yml?branch=main&style=for-the-badge&labelColor=121212&color=121212&label=CI" alt="CI"></a>
   <a href="./README.md"><img src="https://img.shields.io/badge/English-FFFFFF?style=for-the-badge&labelColor=121212" alt="English"></a>
 </p>
