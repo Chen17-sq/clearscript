@@ -7,7 +7,7 @@
 <p align="center">
   <a href="./LICENSE"><img src="https://img.shields.io/badge/协议-MIT-D02020?style=for-the-badge&labelColor=121212" alt="MIT License"></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/PYTHON-3.11+-1040C0?style=for-the-badge&labelColor=121212" alt="Python 3.11+"></a>
-  <a href="https://github.com/Chen17-sq/clearscript/releases"><img src="https://img.shields.io/badge/版本-0.0.10-F0C020?style=for-the-badge&labelColor=121212" alt="v0.0.10"></a>
+  <a href="https://github.com/Chen17-sq/clearscript/releases"><img src="https://img.shields.io/badge/版本-0.0.11-F0C020?style=for-the-badge&labelColor=121212" alt="v0.0.11"></a>
   <a href="https://github.com/Chen17-sq/clearscript/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Chen17-sq/clearscript/ci.yml?branch=main&style=for-the-badge&labelColor=121212&color=121212&label=CI" alt="CI"></a>
   <a href="./README.md"><img src="https://img.shields.io/badge/English-FFFFFF?style=for-the-badge&labelColor=121212" alt="English"></a>
 </p>
@@ -98,19 +98,37 @@ clearscript 是第三条路：
 
 ## 快速开始
 
-> 需要 Python 3.11+ 和 [uv](https://docs.astral.sh/uv/)。
+> 需要 Python 3.11+。
+
+**装成全局工具**（非开发者推荐）:
+
+```bash
+# 用 uv (https://docs.astral.sh/uv/) — 最快
+uv tool install git+https://github.com/Chen17-sq/clearscript.git
+
+# 或者用 pipx (https://pipx.pypa.io/)
+pipx install git+https://github.com/Chen17-sq/clearscript.git
+
+# 配 API key（任选其一即可）
+export ANTHROPIC_API_KEY=sk-ant-...
+# 或 DEEPSEEK_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY
+
+clearscript serve
+```
+
+**或者 clone 下来开发：**
 
 ```bash
 git clone https://github.com/Chen17-sq/clearscript.git
 cd clearscript
 uv sync
-export ANTHROPIC_API_KEY=sk-ant-...   # 或 DEEPSEEK_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY
+export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 ### 方式一 —— Web UI（推荐）
 
 ```bash
-uv run clearscript serve
+clearscript serve         # 或者: uv run clearscript serve
 ```
 
 自动打开 **http://127.0.0.1:7681**。Bauhaus 风格单页界面：选 provider，贴稿子或拖文件，点"Clean transcript"，下载 `.md` / `.docx`。
@@ -118,7 +136,7 @@ uv run clearscript serve
 ### 方式二 —— CLI
 
 ```bash
-uv run clearscript run examples/01-basic-cleanup/input.txt --provider claude
+clearscript run examples/01-basic-cleanup/input.txt --provider claude
 ```
 
 整理后的稿子写在原文件旁边：`input.cleaned.md`，附带 JSON change log。
@@ -128,17 +146,17 @@ uv run clearscript run examples/01-basic-cleanup/input.txt --provider claude
 ```bash
 # OpenAI-compatible (DeepSeek / Moonshot / 通义 / Together / Groq / Fireworks / OpenRouter / ...)
 export DEEPSEEK_API_KEY=sk-...
-uv run clearscript run input.txt --provider deepseek
+clearscript run input.txt --provider deepseek
 
 # 100% 本地 (Ollama / llama.cpp server / LM Studio)
-uv run clearscript run input.txt --provider ollama --model qwen2.5:14b
+clearscript run input.txt --provider ollama --model qwen2.5:14b
 ```
 
 <p align="center"><img src="./docs/assets/divider.svg" alt="" width="100%"></p>
 
 ## 项目状态
 
-> **v0.0.1 — pre-alpha**。仓库已搭好整体架构，跑通最小 happy path（`txt` 输入 → LLM → `md`/`docx` 输出）。完整 v0.1 计划见 [路线图](./docs/ROADMAP.md)。
+> **v0.0.11 — alpha**。本地 Web UI 三个标签页：Editor / Library / Projects；多格式输入（`.txt / .md / .docx / .srt / .vtt / .json`）；可复利的术语库：**Mode A**（库注入 prompt）+ **Mode B**（自动收集建议）+ **Mode C**（跨 chunk 一致性）；预装 17 个常见 ASR 错误的 seed pack；每次 Run 自动存为 project 在 `~/Documents/clearscript/projects/`；**长稿子（60+ 分钟）按说话人切边界自动分块**并拼回；改完术语库后可对老 project **一键 Re-run** 看效果差异；token 级流式输出，能看着干净稿子一字一字蹦出来。完整 v0.1 计划见 [路线图](./docs/ROADMAP.md)。
 
 <table>
 <tr>

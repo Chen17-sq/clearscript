@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.11] - 2026-05-16
+
+### The actually-using-the-library release.
+
+v0.0.9 added the seed pack and v0.0.10 made streaming visible. But the user kept reporting that obvious terms ("Tabby", "OpenCloud", "DeFi") were not being corrected to their canonicals ("Tavily", "OpenClaw", "Dify") *even though* those mappings were sitting right there in the library. The audit found a clean explanation: the pipeline only injected library context when a briefing was provided, and even then only scanned the briefing text — never the transcript itself. So a user who pasted a transcript with no briefing got a silently-empty context block, and the seed pack was dead weight.
+
+This release fixes that, adds cross-chunk learning, and ships project re-run.
+
+### Fixed — Library context now actually loads
+
+- ``Pipeline._collect_library_context`` now scans **the transcript** for library hits, not just the briefing. That was the missing piece — most users don't write a briefing, they just paste a transcript and click Run.
+- Up to 60 term mappings get included in the system prompt; the matched alias is shown both when it equals the canonical (informational) and when it differs (substitution hint).
+- Regression test in ``test_pipeline.py`` pins this behavior: a library with ``Tavily/Tabby`` and a transcript that says "Tabby" — with no briefing at all — now produces a system prompt that contains both names.
+
+### Added — Mode C: cross-chunk learning
+
+When a transcript is long enough to be split into multiple chunks, the model used to discover term substitutions independently in each chunk. If chunk 1 decided "Tabby → Tavily", chunk 2 wouldn't know that and might leave "Tabby" alone, or worse — pick a different correction.
+
+- ``iter_events`` now harvests L3 (ASR-fix) changes from each completed chunk and feeds the resulting alias→canonical pairs into the next chunk's system prompt under a new section: "Earlier chunks in this same run already substituted these — stay consistent."
+- Filtered to short, proper-noun-like substitutions (1–30 chars before/after) so entire-sentence rewrites don't pollute later chunks.
+- Capped at 40 mappings per chunk to keep the prompt bounded.
+
+### Added — Re-run any project against the current library
+
+After you've added or corrected terms in the library, you can replay a saved run to see the improved output — without re-pasting the transcript:
+
+- **Web UI**: ``↻ Re-run`` button on the Projects detail header. The result lands as a sibling project (slug suffix ``-rerun``) so the original is preserved; the new project carries ``rerun_of: <orig_slug>`` in its meta. The UI auto-selects the new project so you can immediately compare.
+- **CLI**: ``clearscript projects rerun <slug>`` — same semantics, optional ``--provider`` / ``--model`` overrides.
+- **API**: ``POST /api/projects/{slug}/rerun`` returns the same SSE event stream as ``/api/run-stream`` so existing clients reuse their handlers.
+
+### Added — Easier install path
+
+Non-developers don't need to clone the repo. README now leads with:
+
+```bash
+uv tool install git+https://github.com/Chen17-sq/clearscript.git
+# or
+pipx install git+https://github.com/Chen17-sq/clearscript.git
+```
+
+Then ``clearscript serve`` works as a system command. The development path (``git clone`` + ``uv sync``) is preserved for contributors.
+
+### Tests
+
+Added regression coverage in ``test_pipeline.py``:
+
+- ``test_pipeline_transcript_seeds_pulled_into_context_without_briefing`` — pins the "transcript without briefing" bug fix.
+- ``test_pipeline_mode_c_propagates_substitutions_across_chunks`` — verifies a substitution committed in chunk 1 is visible in chunk 2's system prompt.
+
+Total: 116 → 116 (replaced two old tests' assertions to match the new prompt shape).
+
 ## [0.0.10] - 2026-04-27
 
 ### Fixed — Streaming UX with reasoning models

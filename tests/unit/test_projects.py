@@ -176,3 +176,82 @@ def test_binary_input_written_as_bytes(tmp_path: Path) -> None:
     # And detail() doesn't choke on binary
     detail = project.detail()
     assert detail["raw_input"] == ""  # binary returns empty string, not crash
+
+
+def test_read_input_returns_text_and_format(tmp_path: Path) -> None:
+    """Project.read_input is the foundation of the rerun feature.
+
+    It must return the original input text plus its format extension so the
+    pipeline can re-parse it with the right adapter.
+    """
+    store = ProjectStore(tmp_path)
+    project = store.create("rerun-source")
+    project.save_run(
+        title="Source",
+        format_="srt",
+        provider="claude",
+        model="opus",
+        input_text="1\n00:00:01,000 --> 00:00:02,000\nSpeaker A: Hi.",
+        edited_markdown="cleaned",
+        change_log=[],
+        suggestions=[],
+        input_tokens=10,
+        output_tokens=5,
+    )
+    result = project.read_input()
+    assert result is not None
+    text, fmt = result
+    assert "Speaker A: Hi." in text
+    assert fmt == "srt"
+
+
+def test_read_input_returns_none_for_binary(tmp_path: Path) -> None:
+    """Binary inputs (e.g. docx) can't be replayed via rerun — return None."""
+    store = ProjectStore(tmp_path)
+    project = store.create("binary-source")
+    # Pack of bytes that's not valid utf-8.
+    project.save_run(
+        title=None,
+        format_="docx",
+        provider="m",
+        model="m",
+        input_bytes=b"\xff\xfe\x00\x01PK\x03\x04binary garbage",
+        input_filename="meeting.docx",
+        edited_markdown="cleaned",
+        change_log=[],
+        suggestions=[],
+        input_tokens=0,
+        output_tokens=0,
+    )
+    assert project.read_input() is None
+
+
+def test_read_briefing_handles_missing_file(tmp_path: Path) -> None:
+    store = ProjectStore(tmp_path)
+    project = store.create("no-briefing")
+    project.save_run(
+        title="",
+        format_="txt",
+        provider="m",
+        model="m",
+        input_text="hi",
+        edited_markdown="hi",
+        change_log=[],
+        suggestions=[],
+        input_tokens=0,
+        output_tokens=0,
+    )
+    assert project.read_briefing() == ""
+
+
+def test_create_rerun_of_uses_parent_slug_tail(tmp_path: Path) -> None:
+    """The rerun slug includes the original's meaningful tail + '-rerun'."""
+    store = ProjectStore(tmp_path)
+    orig = store.create("Acme CTO interview")
+    # Slug format: 2026-05-16-143012-acme-cto-interview
+    assert "acme-cto-interview" in orig.slug
+
+    rerun = store.create_rerun_of(orig.slug)
+    assert rerun.slug != orig.slug
+    assert rerun.slug.endswith("-rerun")
+    assert "acme-cto-interview" in rerun.slug

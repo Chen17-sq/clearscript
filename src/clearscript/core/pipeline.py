@@ -162,6 +162,11 @@ class Pipeline:
         last_model = ""
         last_provider = ""
 
+        # Mode C — cross-chunk learning: substitutions confirmed by the model
+        # in earlier chunks of this run get propagated to later chunks so the
+        # same alias→canonical decision doesn't have to be re-discovered.
+        runtime_mappings: dict[str, str] = {}
+
         for idx, chunk in enumerate(plan.chunks, start=1):
             yield StreamEvent(
                 "chunk_start",
@@ -177,7 +182,7 @@ class Pipeline:
                 # full ChatResponse with usage.
                 accumulated = ""
                 response = None
-                messages = self._build_messages(chunk)
+                messages = self._build_messages(chunk, runtime_mappings=runtime_mappings)
                 for kind, payload in self.provider.chat_with_progress(
                     messages,
                     self.model,
@@ -237,6 +242,24 @@ class Pipeline:
             last_model = chunk_result.model
             last_provider = chunk_result.provider
 
+            # Mode C: harvest L3 (ASR fix) substitutions from this chunk so
+            # the next chunk's prompt knows "we already decided X → Y here".
+            # Filter aggressively: only short before/after pairs that look
+            # like proper-noun substitutions, not entire-sentence rewrites.
+            for change in chunk_result.change_log:
+                layer = str(change.get("layer", "")).upper()
+                before = str(change.get("before") or "").strip()
+                after = str(change.get("after") or "").strip()
+                if (
+                    layer.startswith("L3")
+                    and before
+                    and after
+                    and before != after
+                    and 1 <= len(before) <= 30
+                    and 1 <= len(after) <= 30
+                ):
+                    runtime_mappings.setdefault(before, after)
+
             yield StreamEvent(
                 "chunk_done",
                 {
@@ -285,9 +308,22 @@ class Pipeline:
             },
         )
 
-    def _build_messages(self, chunk: NormalizedTranscript) -> list[ChatMessage]:
-        """Build the system + user message pair for one chunk's LLM call."""
-        library_context = self._collect_library_context(chunk)
+    def _build_messages(
+        self,
+        chunk: NormalizedTranscript,
+        *,
+        runtime_mappings: dict[str, str] | None = None,
+    ) -> list[ChatMessage]:
+        """Build the system + user message pair for one chunk's LLM call.
+
+        ``runtime_mappings`` carries Mode-C decisions from earlier chunks
+        (alias → canonical pairs the model already committed to). Pass it
+        through so the system prompt can mention them and the model stays
+        consistent across the whole transcript.
+        """
+        library_context = self._collect_library_context(
+            chunk, runtime_mappings=runtime_mappings
+        )
         system_prompt = compose_edit_prompt(
             briefing_context=self.briefing_context,
             library_context=library_context,
@@ -345,12 +381,38 @@ class Pipeline:
             "```"
         )
 
-    def _collect_library_context(self, transcript: NormalizedTranscript) -> str:
-        """Mode A: build a context block from library lookups on briefing seeds + detected speakers."""
+    def _collect_library_context(
+        self,
+        transcript: NormalizedTranscript,
+        *,
+        runtime_mappings: dict[str, str] | None = None,
+    ) -> str:
+        """Build the library-context block sent in the system prompt.
+
+        Lookups, in order of priority:
+
+        1. **Detected speakers** in this chunk — match against the speakers
+           table so the model uses canonical names.
+        2. **Entities in the transcript itself** — this is the one that
+           actually catches "Tabby" in the raw text. Previously we only
+           scanned the briefing, so a user with no briefing got an empty
+           library context and the seed pack was effectively dead weight.
+        3. **Entities in the briefing** — additional hints from context the
+           user provided up front.
+        4. **Mode-C runtime mappings** — substitutions already committed
+           to in earlier chunks of this run.
+
+        Capped at a sane number of term lines to keep the prompt small;
+        otherwise a library with 500 terms could blow the context budget.
+        """
         if self.library is None:
             return ""
 
         sections: list[str] = []
+        seen_canonicals: set[str] = set()
+        term_lines: list[str] = []
+        briefing_speaker_lines: list[str] = []
+        max_term_lines = 60
 
         speaker_lines: list[str] = []
         for spk in transcript.detected_speakers:
@@ -363,34 +425,55 @@ class Pipeline:
         if speaker_lines:
             sections.append("Known speakers (from your library):\n" + "\n".join(speaker_lines))
 
-        if self.briefing_context:
-            seen_canonicals: set[str] = set()
-            term_lines: list[str] = []
-            briefing_speaker_lines: list[str] = []
-
-            for token in self._extract_entities(self.briefing_context):
+        # Walk transcript text first — that's where the real ASR mistakes are.
+        for source_text in (transcript.to_markdown(), self.briefing_context or ""):
+            if not source_text:
+                continue
+            for token in self._extract_entities(source_text):
+                if len(term_lines) >= max_term_lines:
+                    break
                 term_hit = self.library.lookup_alias(token)
                 if term_hit and term_hit.canonical not in seen_canonicals:
-                    term_lines.append(
-                        f"- ASR may write {token!r} → canonical `{term_hit.canonical}` "
-                        f"({term_hit.type or 'term'}, confidence {term_hit.confidence:.2f})"
-                    )
-                    seen_canonicals.add(term_hit.canonical)
-                else:
-                    spk_hit = self.library.lookup_speaker(token)
-                    if spk_hit and spk_hit.canonical_name not in seen_canonicals:
-                        briefing_speaker_lines.append(
-                            f"- {token!r} → speaker label `{spk_hit.display_label}` "
-                            f"(real name: {spk_hit.canonical_name})"
+                    if token == term_hit.canonical:
+                        # Token is already the canonical — tell the model the
+                        # term exists (so it preserves spelling) but don't
+                        # frame it as a substitution.
+                        term_lines.append(
+                            f"- {term_hit.canonical!r} is a known {term_hit.type or 'term'} "
+                            f"in your library (confidence {term_hit.confidence:.2f})"
                         )
-                        seen_canonicals.add(spk_hit.canonical_name)
+                    else:
+                        term_lines.append(
+                            f"- ASR may write {token!r} → canonical `{term_hit.canonical}` "
+                            f"({term_hit.type or 'term'}, confidence {term_hit.confidence:.2f})"
+                        )
+                    seen_canonicals.add(term_hit.canonical)
+                    continue
+                spk_hit = self.library.lookup_speaker(token)
+                if spk_hit and spk_hit.canonical_name not in seen_canonicals:
+                    briefing_speaker_lines.append(
+                        f"- {token!r} → speaker label `{spk_hit.display_label}` "
+                        f"(real name: {spk_hit.canonical_name})"
+                    )
+                    seen_canonicals.add(spk_hit.canonical_name)
 
-            if term_lines:
-                sections.append("Term mappings from your library:\n" + "\n".join(term_lines))
-            if briefing_speaker_lines:
-                sections.append(
-                    "Briefing speakers found in your library:\n" + "\n".join(briefing_speaker_lines)
-                )
+        if term_lines:
+            sections.append("Term mappings from your library:\n" + "\n".join(term_lines))
+        if briefing_speaker_lines:
+            sections.append(
+                "Speakers mentioned in context, found in your library:\n"
+                + "\n".join(briefing_speaker_lines)
+            )
+
+        if runtime_mappings:
+            mapping_lines = [
+                f"- {before!r} → `{after}`"
+                for before, after in list(runtime_mappings.items())[:40]
+            ]
+            sections.append(
+                "Earlier chunks in this same run already substituted these — "
+                "stay consistent:\n" + "\n".join(mapping_lines)
+            )
 
         return "\n\n".join(sections)
 

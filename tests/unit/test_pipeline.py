@@ -128,6 +128,105 @@ def test_pipeline_briefing_seeds_pulled_into_context(
     assert "Dify" in system_msg.content
 
 
+def test_pipeline_transcript_seeds_pulled_into_context_without_briefing(
+    tmp_path: Path, mock_provider, tmp_library
+) -> None:
+    """Regression: a library alias appearing only in the transcript (no briefing)
+    must still surface in the system prompt.
+
+    Before v0.0.11, ``_collect_library_context`` only scanned the briefing,
+    so a user with no briefing got an empty library context — the seed pack
+    was effectively dead weight. This is the bug behind the user's
+    "Tabby is not getting fixed to Tavily" complaint.
+    """
+    tmp_library.add_term(canonical="Tavily", aliases=["Tabby"], type_="company")
+    mock_provider.response_text = "Output\n---CHANGELOG---\n[]\n---SUGGESTIONS---\n[]"
+
+    input_path = tmp_path / "t.txt"
+    input_path.write_text(
+        "Speaker 1: We use Tabby for search.\nSpeaker 2: Yeah, Tabby is great.\n",
+        encoding="utf-8",
+    )
+    pipeline = Pipeline(
+        provider=mock_provider,
+        model="mock-model",
+        library=tmp_library,
+        briefing_context="",  # explicitly no briefing
+    )
+    pipeline.run(input_path)
+
+    system_msg = mock_provider.calls[0][0]
+    assert "Term mappings from your library" in system_msg.content
+    assert "Tabby" in system_msg.content
+    assert "Tavily" in system_msg.content
+
+
+def test_pipeline_mode_c_propagates_substitutions_across_chunks(
+    tmp_path: Path, tmp_library
+) -> None:
+    """Mode C: a substitution committed in chunk 1 shows up in chunk 2's prompt."""
+    from clearscript.providers.base import ChatResponse
+
+    class TwoChunkProvider:
+        name = "twochunk"
+
+        def __init__(self) -> None:
+            self.calls: list[list] = []
+            self.responses = [
+                # Chunk 1: model "discovers" Tabby → Tavily
+                "Speaker 1: We use Tavily for search.\n"
+                "---CHANGELOG---\n"
+                '[{"layer": "L3", "before": "Tabby", "after": "Tavily", "reason": "company name"}]\n'
+                "---SUGGESTIONS---\n[]",
+                # Chunk 2: trivial output, no new changes
+                "Speaker 2: More content.\n---CHANGELOG---\n[]\n---SUGGESTIONS---\n[]",
+            ]
+
+        def chat(self, messages, model, **kwargs):  # type: ignore[no-untyped-def]
+            idx = len(self.calls)
+            self.calls.append(list(messages))
+            text = self.responses[idx] if idx < len(self.responses) else self.responses[-1]
+            return ChatResponse(
+                text=text,
+                input_tokens=100,
+                output_tokens=50,
+                model=model,
+                provider=self.name,
+                latency_ms=1.0,
+            )
+
+        def stream(self, messages, model, **kwargs):  # type: ignore[no-untyped-def]
+            yield self.chat(messages, model, **kwargs).text
+
+        def chat_with_progress(self, messages, model, **kwargs):  # type: ignore[no-untyped-def]
+            resp = self.chat(messages, model, **kwargs)
+            yield ("delta", resp.text)
+            yield ("done", resp)
+
+    provider = TwoChunkProvider()
+    pipeline = Pipeline(
+        provider=provider,
+        model="mock-model",
+        library=tmp_library,
+        # Force two chunks by setting tiny target tokens.
+        chunk_target_tokens=20,
+        chunk_trigger_tokens=20,
+        chunk_hard_max_tokens=100,
+    )
+    # Make sure plan returns two chunks.
+    long_text = "Speaker 1: " + ("word " * 50) + "\nSpeaker 2: " + ("more " * 50) + "\n"
+    input_path = tmp_path / "t.txt"
+    input_path.write_text(long_text, encoding="utf-8")
+    pipeline.run(input_path)
+
+    assert len(provider.calls) >= 2, "expected the transcript to be chunked"
+    # Chunk 2's system prompt should mention the Tabby → Tavily decision.
+    chunk2_system = provider.calls[1][0].content
+    assert "Earlier chunks in this same run" in chunk2_system
+    assert "Tabby" in chunk2_system
+    assert "Tavily" in chunk2_system
+
+
 def test_pipeline_split_output_handles_no_suggestions_section(mock_provider) -> None:
     text = "Edited text\n---CHANGELOG---\n[]"
     edited, changelog, suggestions = Pipeline._split_output(text)

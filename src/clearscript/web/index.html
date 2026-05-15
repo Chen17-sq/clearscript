@@ -474,6 +474,7 @@
         <header class="border-b-4 border-ink bg-blue text-white px-5 py-3 flex items-center gap-3">
           <h3 id="project-detail-title" class="font-black uppercase tracking-widest text-sm">Select a run</h3>
           <div class="ml-auto flex items-center gap-2">
+            <button id="proj-rerun" class="bauhaus-press border-2 border-ink bg-white text-ink px-3 py-1 text-[11px] font-bold uppercase tracking-widest shadow-bauhaus-sm hover:bg-yellow disabled:opacity-40" disabled title="Re-run this transcript against your current library">↻ Re-run</button>
             <button id="proj-download-md" class="bauhaus-press border-2 border-ink bg-white text-ink px-3 py-1 text-[11px] font-bold uppercase tracking-widest shadow-bauhaus-sm hover:bg-yellow disabled:opacity-40" disabled>↓ .md</button>
             <button id="proj-download-docx" class="bauhaus-press border-2 border-ink bg-yellow text-ink px-3 py-1 text-[11px] font-bold uppercase tracking-widest shadow-bauhaus-sm hover:opacity-90 disabled:opacity-40" disabled>↓ .docx</button>
             <button id="proj-download-input" class="bauhaus-press border-2 border-ink bg-white text-ink px-3 py-1 text-[11px] font-bold uppercase tracking-widest shadow-bauhaus-sm hover:bg-yellow disabled:opacity-40" disabled>↓ raw</button>
@@ -1516,7 +1517,7 @@
       $('pd-suggestions').textContent = d.suggestions?.length ? JSON.stringify(d.suggestions, null, 2) : '(no suggestions)';
       $('pd-briefing').textContent = d.briefing || '(no briefing supplied)';
 
-      ['proj-download-md', 'proj-download-docx', 'proj-download-input', 'proj-delete'].forEach((id) => $(id).disabled = false);
+      ['proj-download-md', 'proj-download-docx', 'proj-download-input', 'proj-delete', 'proj-rerun'].forEach((id) => $(id).disabled = false);
       setPdTab('cleaned');
     }
 
@@ -1569,6 +1570,84 @@
       });
     }
 
+    async function rerunProject() {
+      // Re-runs the selected project against the *current* library. The
+      // result lands as a brand-new sibling project so the user can diff
+      // the old vs. new output and decide which to keep.
+      if (!state.selectedProjectSlug) return;
+      const origSlug = state.selectedProjectSlug;
+      if (!confirm(
+        `Re-run "${origSlug}" against your current library?\n\n` +
+        `This will create a NEW project with the rerun output. ` +
+        `The original is not modified.`
+      )) return;
+
+      $('proj-rerun').disabled = true;
+      $('proj-rerun').textContent = '↻ Re-running…';
+      try {
+        const res = await fetch(
+          `/api/projects/${encodeURIComponent(origSlug)}/rerun`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({}),
+          },
+        );
+        if (!res.ok || !res.body) {
+          const detail = await res.text();
+          alert(`Rerun failed: ${res.status} ${detail.slice(0, 200)}`);
+          return;
+        }
+        // Consume the SSE stream — we only care about 'saved' (with new
+        // slug) and 'error' here; the UI doesn't try to render mid-stream
+        // output for reruns to keep the projects view simple.
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let newSlug = null;
+        let errMsg = null;
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          let sep;
+          while ((sep = buffer.indexOf('\n\n')) !== -1) {
+            const block = buffer.slice(0, sep);
+            buffer = buffer.slice(sep + 2);
+            const event = parseSSEBlock(block);
+            if (!event) continue;
+            if (event.name === 'saved' && event.data && event.data.project_slug) {
+              newSlug = event.data.project_slug;
+            } else if (event.name === 'error') {
+              errMsg = event.data && event.data.detail;
+            } else if (event.name === 'chunk_done') {
+              // Cheap visual progress — update the button label so the
+              // user knows something is happening on long re-runs.
+              const c = event.data || {};
+              if (c.chunk && c.total) {
+                $('proj-rerun').textContent = `↻ ${c.chunk}/${c.total}`;
+              }
+            }
+          }
+        }
+        if (errMsg) {
+          alert('Rerun error: ' + errMsg);
+          return;
+        }
+        await loadProjects();
+        if (newSlug) {
+          // Auto-select the new sibling so the user lands on the fresh
+          // output and can immediately compare it.
+          selectProject(newSlug);
+        }
+      } catch (e) {
+        alert('Rerun network error: ' + e.message);
+      } finally {
+        $('proj-rerun').disabled = !state.selectedProjectSlug;
+        $('proj-rerun').textContent = '↻ Re-run';
+      }
+    }
+
     async function deleteProject() {
       if (!state.selectedProjectSlug) return;
       if (!confirm(`Delete project ${state.selectedProjectSlug}? This is permanent.`)) return;
@@ -1579,7 +1658,7 @@
       $('project-detail').classList.add('hidden');
       $('project-detail-empty').classList.remove('hidden');
       $('project-detail-empty').textContent = 'Pick a run from the list to see input, cleaned output, change log, and library suggestions.';
-      ['proj-download-md', 'proj-download-docx', 'proj-download-input', 'proj-delete'].forEach((id) => $(id).disabled = true);
+      ['proj-download-md', 'proj-download-docx', 'proj-download-input', 'proj-delete', 'proj-rerun'].forEach((id) => $(id).disabled = true);
       loadProjects();
     }
 
@@ -1673,6 +1752,7 @@
         if (state.selectedProjectSlug) window.location = `/api/projects/${encodeURIComponent(state.selectedProjectSlug)}/input`;
       });
       $('proj-delete').addEventListener('click', deleteProject);
+      $('proj-rerun').addEventListener('click', rerunProject);
 
       // Initial tab from hash
       const initial = window.location.hash.replace('#', '') || 'editor';

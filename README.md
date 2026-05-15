@@ -7,7 +7,7 @@
 <p align="center">
   <a href="./LICENSE"><img src="https://img.shields.io/badge/LICENSE-MIT-D02020?style=for-the-badge&labelColor=121212" alt="MIT License"></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/PYTHON-3.11+-1040C0?style=for-the-badge&labelColor=121212" alt="Python 3.11+"></a>
-  <a href="https://github.com/Chen17-sq/clearscript/releases"><img src="https://img.shields.io/badge/VERSION-0.0.10-F0C020?style=for-the-badge&labelColor=121212" alt="v0.0.10"></a>
+  <a href="https://github.com/Chen17-sq/clearscript/releases"><img src="https://img.shields.io/badge/VERSION-0.0.11-F0C020?style=for-the-badge&labelColor=121212" alt="v0.0.11"></a>
   <a href="https://github.com/Chen17-sq/clearscript/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Chen17-sq/clearscript/ci.yml?branch=main&style=for-the-badge&labelColor=121212&color=121212&label=CI" alt="CI"></a>
   <a href="./README.zh-CN.md"><img src="https://img.shields.io/badge/简体中文-FFFFFF?style=for-the-badge&labelColor=121212" alt="Simplified Chinese"></a>
 </p>
@@ -98,19 +98,37 @@ clearscript is the third option:
 
 ## Quick start
 
-> Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
+> Requires Python 3.11+.
+
+**Install as a global tool** (recommended for non-developers):
+
+```bash
+# with uv (https://docs.astral.sh/uv/) — fastest
+uv tool install git+https://github.com/Chen17-sq/clearscript.git
+
+# or with pipx (https://pipx.pypa.io/)
+pipx install git+https://github.com/Chen17-sq/clearscript.git
+
+# set your key (any one is enough)
+export ANTHROPIC_API_KEY=sk-ant-...
+# or DEEPSEEK_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY
+
+clearscript serve
+```
+
+**Or clone for development:**
 
 ```bash
 git clone https://github.com/Chen17-sq/clearscript.git
 cd clearscript
 uv sync
-export ANTHROPIC_API_KEY=sk-ant-...   # or DEEPSEEK_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY
+export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 ### Option 1 — Web UI (recommended)
 
 ```bash
-uv run clearscript serve
+clearscript serve         # or: uv run clearscript serve
 ```
 
 Opens **http://127.0.0.1:7681** in your browser. Bauhaus-styled single-page interface: pick a provider pill, paste or drag in your transcript, click **Clean transcript**, download as `.md` / `.docx`.
@@ -118,7 +136,7 @@ Opens **http://127.0.0.1:7681** in your browser. Bauhaus-styled single-page inte
 ### Option 2 — CLI
 
 ```bash
-uv run clearscript run examples/01-basic-cleanup/input.txt --provider claude
+clearscript run examples/01-basic-cleanup/input.txt --provider claude
 ```
 
 The cleaned transcript is written next to the input as `input.cleaned.md`, with a JSON change log alongside.
@@ -128,17 +146,17 @@ Prefer a different model?
 ```bash
 # OpenAI-compatible (DeepSeek, Moonshot, Qwen, Together, Groq, Fireworks, Mistral, OpenRouter, ...)
 export DEEPSEEK_API_KEY=sk-...
-uv run clearscript run input.txt --provider deepseek
+clearscript run input.txt --provider deepseek
 
 # 100% local (Ollama / llama.cpp server / LM Studio)
-uv run clearscript run input.txt --provider ollama --model qwen2.5:14b
+clearscript run input.txt --provider ollama --model qwen2.5:14b
 ```
 
 <p align="center"><img src="./docs/assets/divider.svg" alt="" width="100%"></p>
 
 ## Status
 
-> **v0.0.6 — pre-alpha.** Local web UI ships a Bauhaus-styled Editor + Library + Projects tabs; multi-format ingest (`.txt / .md / .docx / .srt / .vtt / .json`); compounding terminology library with Mode A activation and Mode B harvest; every Run auto-saves as a project to `~/Documents/clearscript/projects/`; **long transcripts (60+ min) are auto-chunked** at speaker boundaries and stitched back together. Full v0.1 plan: see [ROADMAP](./docs/ROADMAP.md).
+> **v0.0.11 — alpha.** Local web UI with Editor + Library + Projects tabs; multi-format ingest (`.txt / .md / .docx / .srt / .vtt / .json`); compounding terminology library with **Mode A** (library-into-prompt) + **Mode B** (harvest suggestions) + **Mode C** (cross-chunk consistency); universal seed pack of 17 common ASR mistakes ships pre-installed; every Run auto-saves as a project to `~/Documents/clearscript/projects/`; **long transcripts (60+ min) are auto-chunked** at speaker boundaries and stitched back together; **Re-run** any saved project against the current library to see the improved output side-by-side. Token-level live streaming so you watch the cleaned text appear in real time. Full v0.1 plan: see [ROADMAP](./docs/ROADMAP.md).
 
 ### Supported input formats today
 

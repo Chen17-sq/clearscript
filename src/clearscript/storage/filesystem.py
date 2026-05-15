@@ -211,6 +211,25 @@ class Project:
         if self.root.exists():
             shutil.rmtree(self.root)
 
+    def read_input(self) -> tuple[str, str] | None:
+        """Read the raw input text + format extension back.
+
+        Returns ``None`` for binary inputs (e.g. .docx) or missing files —
+        rerun is only meaningful when we can replay the original text.
+        """
+        for p in self.raw_dir.glob("input.*"):
+            ext = p.suffix.lstrip(".")
+            try:
+                return p.read_text(encoding="utf-8"), ext
+            except (UnicodeDecodeError, OSError):
+                return None
+        return None
+
+    def read_briefing(self) -> str:
+        if self.briefing_path.is_file():
+            return self.briefing_path.read_text(encoding="utf-8")
+        return ""
+
 
 class ProjectStore:
     """Locates and creates project directories under a root."""
@@ -239,6 +258,17 @@ class ProjectStore:
 
     def open(self, slug: str) -> Project:
         return Project(slug=slug, root=self.root / slug)
+
+    def create_rerun_of(self, orig_slug: str) -> Project:
+        """Create a sibling project for a re-run, with a stable suffix.
+
+        The new slug retains the meaningful tail of the original (everything
+        after the timestamp prefix) plus ``-rerun`` — e.g.
+        ``2026-05-16-143012-acme-cto`` → ``2026-05-16-150455-acme-cto-rerun``.
+        """
+        tail = _SLUG_TIME_PREFIX.sub("", orig_slug)
+        hint = f"{tail}-rerun"
+        return self.create(hint)
 
     def exists(self, slug: str) -> bool:
         return (self.root / slug / "meta.json").is_file()

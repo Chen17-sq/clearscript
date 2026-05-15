@@ -1,6 +1,6 @@
 [project]
 name = "clearscript"
-version = "0.0.10"
+version = "0.0.11"
 description = "Local-first ASR transcript editor with a compounding terminology library. Bring your own model."
 readme = "README.md"
 license = { text = "MIT" }

@@ -347,6 +347,123 @@ def projects_path() -> None:
     console.print(str(cfg.projects_root))
 
 
+@projects_app.command("rerun")
+def projects_rerun(
+    slug: str = typer.Argument(..., help="Project slug to re-run"),
+    provider: str | None = typer.Option(
+        None, "--provider", "-p", help="Provider override (default: original project's)"
+    ),
+    model: str | None = typer.Option(
+        None, "--model", "-m", help="Model override (default: original project's)"
+    ),
+) -> None:
+    """Re-run a saved project against the *current* library.
+
+    Use this after you've added or corrected terms in the library — the
+    rerun captures the improved output as a new sibling project so you
+    can diff the two runs and see what changed.
+    """
+    from clearscript.ingest import TxtAdapter
+    from clearscript.ingest.json_ingest import JsonAdapter
+    from clearscript.ingest.md import MdAdapter
+    from clearscript.ingest.srt import SrtAdapter
+    from clearscript.ingest.vtt import VttAdapter
+
+    cfg = load_config()
+    ensure_dirs(cfg)
+    store = ProjectStore(cfg.projects_root)
+    if not store.exists(slug):
+        err_console.print(f"[red]Project {slug!r} not found[/red]")
+        raise typer.Exit(1)
+
+    orig = store.open(slug)
+    orig_meta = orig.read_meta()
+    input_pair = orig.read_input()
+    if input_pair is None:
+        err_console.print(
+            f"[red]Cannot re-run {slug!r}: original input is binary or unreadable. "
+            "Run `clearscript run` against the source file again instead.[/red]"
+        )
+        raise typer.Exit(2)
+
+    input_text, fmt = input_pair
+    briefing_text = orig.read_briefing()
+
+    chosen_provider_name = provider or orig_meta.get("provider")
+    try:
+        provider_cfg = cfg.get_provider(chosen_provider_name)
+    except KeyError as exc:
+        err_console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(2) from exc
+
+    chosen_model = model or orig_meta.get("model") or provider_cfg.default_model
+    if not chosen_model:
+        err_console.print("[red]No model resolved for rerun — pass --model[/red]")
+        raise typer.Exit(2)
+
+    try:
+        llm = build_provider(provider_cfg)
+    except RuntimeError as exc:
+        err_console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(2) from exc
+
+    adapters = {
+        "txt": TxtAdapter,
+        "md": MdAdapter,
+        "srt": SrtAdapter,
+        "vtt": VttAdapter,
+        "json": JsonAdapter,
+    }
+    adapter_cls = adapters.get(fmt, TxtAdapter)
+    try:
+        transcript_obj = adapter_cls().parse_string(input_text)
+    except ValueError as exc:
+        err_console.print(f"[red]Failed to parse stored input: {exc}[/red]")
+        raise typer.Exit(2) from exc
+
+    library = Library(cfg.library_path)
+    pipeline = Pipeline(
+        provider=llm,
+        model=chosen_model,
+        library=library,
+        briefing_context=briefing_text,
+    )
+
+    console.print(f"[bold]Re-running:[/bold] {slug}")
+    console.print(f"[bold]Provider:[/bold]   {chosen_provider_name} · model {chosen_model}")
+    console.print()
+
+    try:
+        result = pipeline.run_on_transcript(transcript_obj)
+    except Exception as exc:
+        err_console.print(f"[red]Pipeline failed: {exc}[/red]")
+        raise typer.Exit(1) from exc
+    finally:
+        library.close()
+
+    new_project = store.create_rerun_of(slug)
+    new_project.save_run(
+        title=orig_meta.get("title"),
+        format_=fmt,
+        provider=result.provider,
+        model=result.model,
+        input_text=input_text,
+        briefing=briefing_text,
+        edited_markdown=result.edited_markdown,
+        change_log=result.change_log,
+        suggestions=result.suggestions,
+        input_tokens=result.input_tokens,
+        output_tokens=result.output_tokens,
+    )
+    meta = new_project.read_meta()
+    meta["rerun_of"] = slug
+    new_project.write_meta(meta)
+
+    console.print(f"[green]✓[/green] new project: {new_project.slug}")
+    console.print(f"[dim]changes: {len(result.change_log)} · "
+                  f"tokens: in={result.input_tokens} out={result.output_tokens}[/dim]")
+
+
 @lib_app.command("lookup")
 def lib_lookup(
     alias: str = typer.Argument(..., help="ASR variant or canonical to look up"),
