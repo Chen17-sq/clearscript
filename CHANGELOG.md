@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.15] - 2026-05-23
+
+### Fixed — CI green on Windows
+
+v0.0.14 shipped with all UX fixes but CI failed on the Windows runners
+across all Python versions. Cause: test fixtures wrote a tmp ``config.toml``
+embedding the tmp_path as a TOML basic (double-quoted) string. On Windows
+tmp_path looks like ``C:\Users\runneradmin\...`` — and the TOML parser
+interpreted ``\U`` as a Unicode escape, failing with "Invalid hex value
+at line 1, column 22".
+
+Fix: switch the three fixture writes to TOML literal (single-quoted)
+strings, which don't interpret escape sequences. Confirmed green across
+all 9 CI matrix cells (py3.11/3.12/3.13 × Linux/macOS/Windows).
+
+This is a test-only fix — the v0.0.14 runtime works fine on Windows;
+only the test suite couldn't run there. v0.0.15 = v0.0.14 + the
+cross-platform CI fix, recommended as the "known good" tag.
+
 ## [0.0.14] - 2026-05-23
 
 ### The "actually-usable-by-a-non-tech-VC-analyst" release.
