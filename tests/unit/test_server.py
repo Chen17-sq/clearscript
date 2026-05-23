@@ -82,17 +82,33 @@ def app_client(tmp_path, monkeypatch):
 
     The provider factory is patched so requests don't hit a real LLM.
     Returns ``(client, stub_provider)`` so tests can inspect what got sent.
+
+    IMPORTANT: ``projects_root`` defaults to ``~/Documents/clearscript/projects``
+    via the Config dataclass — NOT DATA_DIR. So we must drop a real
+    ``config.toml`` into the patched CONFIG_DIR that overrides projects_root,
+    otherwise tests will write to the user's real ~/Documents.
     """
-    # Redirect XDG-ish dirs so tests don't touch the user's real install.
     cfg_dir = tmp_path / "config"
     data_dir = tmp_path / "data"
+    projects_root = tmp_path / "projects"
     cfg_dir.mkdir()
     data_dir.mkdir()
+    projects_root.mkdir()
     monkeypatch.setattr("clearscript.config.CONFIG_DIR", cfg_dir)
     monkeypatch.setattr("clearscript.config.DATA_DIR", data_dir)
-    monkeypatch.setattr("clearscript.config.CONFIG_FILE", cfg_dir / "config.toml")
+    cfg_file = cfg_dir / "config.toml"
+    monkeypatch.setattr("clearscript.config.CONFIG_FILE", cfg_file)
     monkeypatch.setattr(
         "clearscript.config.PROVIDERS_FILE", cfg_dir / "providers.toml"
+    )
+
+    # Override projects_root via the config TOML — Config's default_factory
+    # for projects_root uses Path.home() directly, so we can't redirect it
+    # purely with attribute patches.
+    cfg_file.write_text(
+        f'projects_root = "{projects_root}"\n'
+        f'library_path = "{data_dir / "library" / "library.db"}"\n',
+        encoding="utf-8",
     )
 
     stub = StubProvider()
@@ -691,6 +707,131 @@ def test_library_bulk_delete_rejects_non_int_ids(app_client) -> None:
         json={"ids": ["not-an-int", 5]},
     )
     assert res.status_code == 400
+
+
+def test_suggestions_inbox_aggregates_across_runs(app_client) -> None:
+    """Two runs that both emit the same suggestion → inbox merges them
+    into one row with times_seen=2 and both source slugs.
+    """
+    client, stub = app_client
+
+    # Use a canonical that is NOT in the seed pack so the inbox doesn't
+    # filter it out as "already in library".
+    suggestion_payload = (
+        "Cleaned\n---CHANGELOG---\n[]\n"
+        '---SUGGESTIONS---\n[{"kind": "term", "canonical": "BrandNewCorp", "aliases_seen": ["BNC"], "type": "company"}]'
+    )
+
+    stub.response_text = suggestion_payload
+    res1 = client.post("/api/run", json={"transcript": "Speaker 1: BNC thing.\n"})
+    assert res1.status_code == 200
+
+    # Second run, same suggestion.
+    stub.response_text = suggestion_payload
+    res2 = client.post("/api/run", json={"transcript": "Speaker 1: BNC again.\n"})
+    assert res2.status_code == 200
+
+    inbox = client.get("/api/library/suggestions/inbox").json()
+    rows = inbox["suggestions"]
+    # Should be exactly one merged entry for BrandNewCorp.
+    hits = [r for r in rows if r.get("canonical") == "BrandNewCorp"]
+    assert len(hits) == 1
+    assert hits[0]["times_seen"] == 2
+    assert len(hits[0]["source_slugs"]) == 2
+
+
+def test_suggestions_inbox_excludes_already_accepted(app_client) -> None:
+    """If the suggested term is already in the library, hide it from the inbox."""
+    client, stub = app_client
+
+    # NOT in the seed pack — has to be a fresh canonical to test the
+    # excluded-after-accept behavior cleanly.
+    stub.response_text = (
+        "Cleaned\n---CHANGELOG---\n[]\n"
+        '---SUGGESTIONS---\n[{"kind": "term", "canonical": "FreshTerm", "aliases_seen": ["ft"]}]'
+    )
+    client.post("/api/run", json={"transcript": "Speaker 1: ft stuff.\n"})
+
+    # Inbox shows it.
+    inbox = client.get("/api/library/suggestions/inbox").json()
+    assert any(r.get("canonical") == "FreshTerm" for r in inbox["suggestions"])
+
+    # Accept.
+    client.post(
+        "/api/library/accept-suggestions",
+        json={"suggestions": [{"kind": "term", "canonical": "FreshTerm", "aliases_seen": ["ft"]}]},
+    )
+
+    # Inbox no longer shows it.
+    inbox = client.get("/api/library/suggestions/inbox").json()
+    assert not any(r.get("canonical") == "FreshTerm" for r in inbox["suggestions"])
+
+
+def test_suggestions_inbox_dismiss_filters_subsequent_calls(app_client) -> None:
+    """Dismissed suggestions stay dismissed across calls."""
+    client, stub = app_client
+
+    stub.response_text = (
+        "Cleaned\n---CHANGELOG---\n[]\n"
+        '---SUGGESTIONS---\n[{"kind": "term", "canonical": "NotUseful"}]'
+    )
+    client.post("/api/run", json={"transcript": "Speaker 1: not useful.\n"})
+
+    assert any(
+        r.get("canonical") == "NotUseful"
+        for r in client.get("/api/library/suggestions/inbox").json()["suggestions"]
+    )
+
+    # Dismiss.
+    res = client.post(
+        "/api/library/suggestions/inbox/dismiss",
+        json={"kind": "term", "identity": "NotUseful"},
+    )
+    assert res.status_code == 200
+
+    # Gone.
+    assert not any(
+        r.get("canonical") == "NotUseful"
+        for r in client.get("/api/library/suggestions/inbox").json()["suggestions"]
+    )
+
+
+def test_suggestions_inbox_dismiss_validates_payload(app_client) -> None:
+    client, _ = app_client
+    res = client.post(
+        "/api/library/suggestions/inbox/dismiss",
+        json={"kind": "term"},  # missing identity
+    )
+    assert res.status_code == 400
+
+
+def test_suggestions_inbox_clear_dismissals_resets(app_client) -> None:
+    """DELETE /api/library/suggestions/inbox/dismissed wipes the file."""
+    client, stub = app_client
+
+    stub.response_text = (
+        "Cleaned\n---CHANGELOG---\n[]\n"
+        '---SUGGESTIONS---\n[{"kind": "term", "canonical": "ResetMe"}]'
+    )
+    client.post("/api/run", json={"transcript": "Speaker 1: x.\n"})
+    client.post(
+        "/api/library/suggestions/inbox/dismiss",
+        json={"kind": "term", "identity": "ResetMe"},
+    )
+    # Confirm dismissed.
+    assert not any(
+        r.get("canonical") == "ResetMe"
+        for r in client.get("/api/library/suggestions/inbox").json()["suggestions"]
+    )
+
+    res = client.delete("/api/library/suggestions/inbox/dismissed")
+    assert res.status_code == 204
+
+    # Re-appears.
+    assert any(
+        r.get("canonical") == "ResetMe"
+        for r in client.get("/api/library/suggestions/inbox").json()["suggestions"]
+    )
 
 
 def test_library_negatives_crud(app_client) -> None:

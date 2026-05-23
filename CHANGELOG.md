@@ -7,6 +7,106 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.14] - 2026-05-23
+
+### The "actually-usable-by-a-non-tech-VC-analyst" release.
+
+The /goal directive was: "I want a complete, fully usable project." A
+production-readiness audit flagged 3 P1 UX gaps a non-tech user would
+hit before their first coffee. v0.0.14 closes them, plus two real bugs
+the audit shook out.
+
+### Added — Pre-flight cost confirmation
+
+A 60-minute founder interview on Claude Opus runs ~$10-50 depending on
+length. v0.0.13 showed an estimate but didn't gate the run. v0.0.14:
+before ``/api/run-stream`` fires, the JS checks the latest cost estimate
+against a soft cap (default $0.50, settable via
+``localStorage.setItem('clearscript-cost-cap', '5.00')``) and requires
+explicit ``confirm()`` above it. Shows token counts + model name so the
+user knows what they're approving.
+
+### Added — Library health panel in the web UI
+
+v0.0.13 shipped the ``/api/library/health`` endpoint + CLI command but
+no web UI surface. v0.0.14: a new **Health** subtab in the Library tab
+shows duplicate aliases (red — these are pipeline correctness bugs),
+duplicate canonicals, low-confidence terms (< 0.3), and stale terms
+(>90 days unused). Each section has a hint line explaining why it
+matters and what to do.
+
+### Added — Persistent suggestions inbox (Mode B v2)
+
+Until now, Mode B suggestions lived inside each project's
+``suggestions.json``. If you ran 10 transcripts and didn't accept
+suggestions immediately, you'd have to drill into each project to
+harvest them. v0.0.14:
+
+- ``GET /api/library/suggestions/inbox`` aggregates pending suggestions
+  across **every** saved project, dedupes by ``(kind, canonical/title)``,
+  filters out anything already in your library, and tracks
+  ``times_seen`` + ``source_slugs`` so you see which terms are recurring.
+- ``POST /api/library/suggestions/inbox/dismiss`` records explicit
+  rejections to a sidecar JSON so they don't keep resurfacing.
+- ``DELETE /api/library/suggestions/inbox/dismissed`` wipes the
+  dismissal set if you want to re-review everything.
+- **Web UI**: new **Inbox** subtab in the Library tab with per-item
+  Accept / Dismiss buttons + an **Accept all** action. A red badge on
+  the tab nav shows the pending count, refreshed automatically after
+  each run.
+
+### Added — Better first-run UX
+
+When no provider has an API key set, the editor now shows a persistent
+yellow help card (instead of the easy-to-miss status pill) with:
+
+- A table of every provider's env var name (copy-paste ready)
+- A "where to get one →" link for each provider
+- A note about adding the export to ``~/.zshrc`` / ``~/.bashrc``
+- A "keys stay on your machine" reminder
+
+### Added — Negatives + Compare buttons in the web UI
+
+- **Negatives** subtab in the Library tab with add/list/delete UI
+  (matches the v0.0.13 CLI commands).
+- **⇄ Compare** button on rerun project cards opens a colorized diff
+  modal (+green / -red / @@blue hunk markers) — already in v0.0.13's
+  detail panel, this just makes the entry point more visible.
+
+### Fixed — Test fixtures leaking into the user's real ~/Documents
+
+**The audit's biggest find.** ``Config.projects_root`` defaults to
+``Path.home() / "Documents" / "clearscript" / "projects"`` (by design,
+so non-tech users can find their files in Finder). But test fixtures
+were patching ``DATA_DIR`` only, leaving ``projects_root`` pointing at
+the user's real directory. Every test run wrote 5-20 garbage projects
+to ``~/Documents/clearscript/projects/``. Across this session that
+accumulated to 277 leaked test projects on the maintainer's machine —
+plus malformed meta.json files that crashed the project listing.
+
+Fix: every test fixture now writes a ``config.toml`` into the patched
+``CONFIG_DIR`` that explicitly overrides ``projects_root`` to a
+``tmp_path`` directory. Verified clean: before this fix, ``pytest``
+added ~5 leak directories per run; after this fix, the user's
+projects dir count stays stable.
+
+### Fixed — Inbox / accept-suggestion overlap with seed pack
+
+Wrote inbox tests using "Mem0" and "Manus" as the canonical — both
+already in the seed pack, so the inbox correctly excluded them and the
+tests failed. Replaced with non-seed-pack canonicals in the tests.
+
+### Tests
+
+243 → **248** (+5). All passing. Ruff clean. New test cases:
+
+- ``test_server.py``: +5 (inbox aggregates across runs, inbox excludes
+  already-accepted, dismiss persists, dismiss validates payload, clear
+  dismissals resets)
+
+The big wins this release are UX, not LOC. But the test-pollution fix
+makes future tests trustworthy.
+
 ## [0.0.13] - 2026-05-23
 
 ### The library-hygiene + reproducibility release.

@@ -48,16 +48,29 @@ class CliMockProvider:
 
 @pytest.fixture
 def cli_env(tmp_path, monkeypatch):
-    """Patch config dirs + provider builder so CLI commands work offline."""
+    """Patch config dirs + provider builder so CLI commands work offline.
+
+    Same caveat as test_server.py's app_client fixture: projects_root
+    defaults to ~/Documents/clearscript/projects via Path.home(), so we
+    must override it via config.toml, not just by patching DATA_DIR.
+    """
     cfg_dir = tmp_path / "config"
     data_dir = tmp_path / "data"
+    projects_root = tmp_path / "projects"
     cfg_dir.mkdir()
     data_dir.mkdir()
+    projects_root.mkdir()
+    cfg_file = cfg_dir / "config.toml"
     monkeypatch.setattr("clearscript.config.CONFIG_DIR", cfg_dir)
     monkeypatch.setattr("clearscript.config.DATA_DIR", data_dir)
-    monkeypatch.setattr("clearscript.config.CONFIG_FILE", cfg_dir / "config.toml")
+    monkeypatch.setattr("clearscript.config.CONFIG_FILE", cfg_file)
     monkeypatch.setattr(
         "clearscript.config.PROVIDERS_FILE", cfg_dir / "providers.toml"
+    )
+    cfg_file.write_text(
+        f'projects_root = "{projects_root}"\n'
+        f'library_path = "{data_dir / "library" / "library.db"}"\n',
+        encoding="utf-8",
     )
     monkeypatch.setattr("clearscript.cli.build_provider", lambda _c: CliMockProvider())
     return tmp_path
@@ -93,12 +106,36 @@ def test_run_command_writes_cleaned_md(cli_env, tmp_path) -> None:
     assert log_path.is_file()
 
 
-def test_projects_list_command(cli_env, tmp_path) -> None:
-    # Generate a project via run.
-    input_path = tmp_path / "x.txt"
-    input_path.write_text("Speaker 1: hi.\n", encoding="utf-8")
-    runner.invoke(app, ["run", str(input_path), "--provider", "claude", "--no-library"])
+def _seed_project(slug_hint: str, text: str = "Speaker 1: seed.\n") -> str:
+    """Helper: create a project on disk via the ProjectStore API directly.
 
+    The CLI ``run`` command writes cleaned md/changelog files but does NOT
+    save a project record (that's the web ``/api/run`` path). Tests that
+    need an existing project to operate on therefore seed one directly.
+    """
+    from clearscript.config import load_config
+    from clearscript.storage import ProjectStore
+
+    cfg = load_config()
+    store = ProjectStore(cfg.projects_root)
+    project = store.create(slug_hint)
+    project.save_run(
+        title=slug_hint,
+        format_="txt",
+        provider="claude",
+        model="claude-opus-4-7",
+        input_text=text,
+        edited_markdown="cleaned output",
+        change_log=[],
+        suggestions=[],
+        input_tokens=10,
+        output_tokens=5,
+    )
+    return project.slug
+
+
+def test_projects_list_command(cli_env, tmp_path) -> None:
+    _seed_project("list-test")
     result = runner.invoke(app, ["projects", "list"])
     assert result.exit_code == 0
     # The Rich table prints column headers and at least one row.
@@ -107,17 +144,7 @@ def test_projects_list_command(cli_env, tmp_path) -> None:
 
 def test_projects_rerun_creates_sibling(cli_env, tmp_path) -> None:
     """`clearscript projects rerun <slug>` produces a -rerun sibling project."""
-    input_path = tmp_path / "x.txt"
-    input_path.write_text("Speaker 1: hi there.\n", encoding="utf-8")
-    runner.invoke(app, ["run", str(input_path), "--provider", "claude", "--no-library"])
-
-    # Look up the project slug just created.
-    from clearscript.config import load_config
-    from clearscript.storage import ProjectStore
-
-    summaries = ProjectStore(load_config().projects_root).list_summaries()
-    assert summaries, "expected at least one saved project"
-    orig_slug = summaries[0]["slug"]
+    orig_slug = _seed_project("rerun-source", "Speaker 1: hi there.\n")
 
     result = runner.invoke(
         app, ["projects", "rerun", orig_slug, "--provider", "claude"]
@@ -126,6 +153,9 @@ def test_projects_rerun_creates_sibling(cli_env, tmp_path) -> None:
     assert "new project" in result.stdout.lower()
 
     # Confirm sibling slug exists.
+    from clearscript.config import load_config
+    from clearscript.storage import ProjectStore
+
     new_summaries = ProjectStore(load_config().projects_root).list_summaries()
     slugs = [s["slug"] for s in new_summaries]
     assert any(s.endswith("-rerun") for s in slugs)

@@ -7,7 +7,7 @@
 <p align="center">
   <a href="./LICENSE"><img src="https://img.shields.io/badge/LICENSE-MIT-D02020?style=for-the-badge&labelColor=121212" alt="MIT License"></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/PYTHON-3.11+-1040C0?style=for-the-badge&labelColor=121212" alt="Python 3.11+"></a>
-  <a href="https://github.com/Chen17-sq/clearscript/releases"><img src="https://img.shields.io/badge/VERSION-0.0.13-F0C020?style=for-the-badge&labelColor=121212" alt="v0.0.13"></a>
+  <a href="https://github.com/Chen17-sq/clearscript/releases"><img src="https://img.shields.io/badge/VERSION-0.0.14-F0C020?style=for-the-badge&labelColor=121212" alt="v0.0.14"></a>
   <a href="https://github.com/Chen17-sq/clearscript/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Chen17-sq/clearscript/ci.yml?branch=main&style=for-the-badge&labelColor=121212&color=121212&label=CI" alt="CI"></a>
   <a href="./README.zh-CN.md"><img src="https://img.shields.io/badge/简体中文-FFFFFF?style=for-the-badge&labelColor=121212" alt="Simplified Chinese"></a>
 </p>
@@ -156,7 +156,7 @@ clearscript run input.txt --provider ollama --model qwen2.5:14b
 
 ## Status
 
-> **v0.0.11 — alpha.** Local web UI with Editor + Library + Projects tabs; multi-format ingest (`.txt / .md / .docx / .srt / .vtt / .json`); compounding terminology library with **Mode A** (library-into-prompt) + **Mode B** (harvest suggestions) + **Mode C** (cross-chunk consistency); universal seed pack of 17 common ASR mistakes ships pre-installed; every Run auto-saves as a project to `~/Documents/clearscript/projects/`; **long transcripts (60+ min) are auto-chunked** at speaker boundaries and stitched back together; **Re-run** any saved project against the current library to see the improved output side-by-side. Token-level live streaming so you watch the cleaned text appear in real time. Full v0.1 plan: see [ROADMAP](./docs/ROADMAP.md).
+> **v0.0.14 — alpha.** Local web UI with Editor + Library + Projects tabs; multi-format ingest (`.txt / .md / .docx / .srt / .vtt / .json`); compounding terminology library with **Mode A** (library-into-prompt) + **Mode B** (harvest suggestions, with a persistent inbox across all runs) + **Mode C** (cross-chunk consistency); universal seed pack of 17 common ASR mistakes ships pre-installed; every Run auto-saves as a project to `~/Documents/clearscript/projects/`; **long transcripts (60+ min) are auto-chunked** at speaker boundaries and stitched back together; **Re-run** any saved project against the current library and a side-by-side **diff modal** shows exactly what your library tweak changed; **library health dashboard** flags duplicates / low-confidence / stale terms; **library export/import** as JSON or git-friendly markdown; **pre-flight cost confirmation** so a 60-min Opus run doesn't surprise you. Token-level live streaming so you watch the cleaned text appear in real time. Full v0.1 plan: see [ROADMAP](./docs/ROADMAP.md).
 
 ### Supported input formats today
 

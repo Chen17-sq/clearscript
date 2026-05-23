@@ -321,6 +321,12 @@
         <button data-subtab="terms" class="lib-subtab bauhaus-press border-r-4 border-ink px-6 py-2 text-xs font-black uppercase tracking-widest bg-red text-white">Terms</button>
         <button data-subtab="speakers" class="lib-subtab bauhaus-press border-r-4 border-ink px-6 py-2 text-xs font-black uppercase tracking-widest bg-white text-ink hover:bg-yellow">Speakers</button>
         <button data-subtab="patterns" class="lib-subtab bauhaus-press border-r-4 border-ink px-6 py-2 text-xs font-black uppercase tracking-widest bg-white text-ink hover:bg-yellow">Edit patterns</button>
+        <button data-subtab="negatives" class="lib-subtab bauhaus-press border-r-4 border-ink px-6 py-2 text-xs font-black uppercase tracking-widest bg-white text-ink hover:bg-yellow">Negatives</button>
+        <button data-subtab="inbox" class="lib-subtab bauhaus-press border-r-4 border-ink px-6 py-2 text-xs font-black uppercase tracking-widest bg-white text-ink hover:bg-yellow relative">
+          Inbox
+          <span id="inbox-badge" class="hidden absolute -top-1 -right-1 bg-red text-white text-[9px] font-bold px-1.5 rounded-full">0</span>
+        </button>
+        <button data-subtab="health" class="lib-subtab bauhaus-press border-r-4 border-ink px-6 py-2 text-xs font-black uppercase tracking-widest bg-white text-ink hover:bg-yellow">Health</button>
       </div>
     </nav>
 
@@ -441,6 +447,57 @@
         </div>
 
         <div id="patterns-list" class="p-4 space-y-3">
+          <p class="text-center text-ink/40 italic py-4">Loading…</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- NEGATIVES SUB-VIEW -->
+    <section id="lib-negatives-view" class="lib-subview hidden-view max-w-[1400px] mx-auto px-6 py-6">
+      <div class="border-4 border-ink bg-white shadow-bauhaus-lg">
+        <header class="border-b-4 border-ink bg-ink text-white px-5 py-3 flex items-center gap-3">
+          <h2 class="font-black uppercase tracking-widest text-sm">Negatives — do-not-change rules</h2>
+          <button id="negatives-add-btn" class="ml-auto bauhaus-press border-2 border-ink bg-yellow text-ink px-4 py-1 text-xs font-bold uppercase tracking-widest shadow-bauhaus-sm hover:opacity-90">+ Add rule</button>
+        </header>
+
+        <div id="negatives-add-form" class="hidden border-b-4 border-ink p-4 bg-bg grid grid-cols-1 gap-3">
+          <input id="add-neg-text" placeholder="Phrase the model keeps over-correcting (e.g. 蛮好的)" class="border-2 border-ink px-3 py-2 text-sm bg-white font-mono" />
+          <input id="add-neg-target" placeholder="Don't change to (e.g. 很好) — leave blank for 'don't change at all'" class="border-2 border-ink px-3 py-2 text-sm bg-white font-mono" />
+          <input id="add-neg-domain" placeholder="domain (optional)" class="border-2 border-ink px-3 py-2 text-sm bg-white" />
+          <textarea id="add-neg-reason" rows="2" placeholder="Why (optional)" class="border-2 border-ink px-3 py-2 text-sm bg-white resize-none"></textarea>
+          <button id="negatives-add-submit" class="bauhaus-press self-start border-2 border-ink bg-red text-white px-4 py-2 text-xs font-bold uppercase tracking-widest shadow-bauhaus-sm hover:opacity-90">Save</button>
+        </div>
+
+        <div id="negatives-list" class="p-4 space-y-2">
+          <p class="text-center text-ink/40 italic py-4">Loading…</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- INBOX SUB-VIEW (persistent suggestions from past runs) -->
+    <section id="lib-inbox-view" class="lib-subview hidden-view max-w-[1400px] mx-auto px-6 py-6">
+      <div class="border-4 border-ink bg-white shadow-bauhaus-lg">
+        <header class="border-b-4 border-ink bg-ink text-white px-5 py-3 flex flex-wrap items-center gap-3">
+          <h2 class="font-black uppercase tracking-widest text-sm">Inbox — pending suggestions across all runs</h2>
+          <span id="inbox-count" class="text-xs font-mono opacity-70">—</span>
+          <button id="inbox-refresh" class="ml-auto bauhaus-press border-2 border-ink bg-white text-ink px-3 py-1 text-[11px] font-bold uppercase tracking-widest shadow-bauhaus-sm hover:bg-yellow">↻ Refresh</button>
+          <button id="inbox-accept-all" class="bauhaus-press border-2 border-ink bg-yellow text-ink px-3 py-1 text-[11px] font-bold uppercase tracking-widest shadow-bauhaus-sm hover:opacity-90">✓ Accept all</button>
+        </header>
+        <div id="inbox-list" class="p-4 space-y-2">
+          <p class="text-center text-ink/40 italic py-4">Loading…</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- HEALTH SUB-VIEW -->
+    <section id="lib-health-view" class="lib-subview hidden-view max-w-[1400px] mx-auto px-6 py-6">
+      <div class="border-4 border-ink bg-white shadow-bauhaus-lg">
+        <header class="border-b-4 border-ink bg-ink text-white px-5 py-3 flex items-center gap-3">
+          <h2 class="font-black uppercase tracking-widest text-sm">Library health</h2>
+          <span id="health-summary" class="text-xs font-mono opacity-70">—</span>
+          <button id="health-refresh" class="ml-auto bauhaus-press border-2 border-ink bg-white text-ink px-3 py-1 text-[11px] font-bold uppercase tracking-widest shadow-bauhaus-sm hover:bg-yellow">↻ Refresh</button>
+        </header>
+        <div id="health-body" class="p-4 space-y-4">
           <p class="text-center text-ink/40 italic py-4">Loading…</p>
         </div>
       </div>
@@ -586,7 +643,7 @@
     }
     function setSubtab(name) {
       state.subtab = name;
-      ['terms', 'speakers', 'patterns'].forEach((s) => {
+      ['terms', 'speakers', 'patterns', 'negatives', 'inbox', 'health'].forEach((s) => {
         $(`lib-${s}-view`).classList.toggle('hidden-view', s !== name);
       });
       $$('.lib-subtab').forEach((btn) => {
@@ -602,6 +659,9 @@
       if (state.subtab === 'terms') loadTerms();
       else if (state.subtab === 'speakers') loadSpeakers();
       else if (state.subtab === 'patterns') loadPatterns();
+      else if (state.subtab === 'negatives') loadNegatives();
+      else if (state.subtab === 'inbox') loadInbox();
+      else if (state.subtab === 'health') loadHealth();
     }
 
     // ============ Status helper ============
@@ -646,8 +706,63 @@
         const haveKey = state.providers.find((p) => p.has_key);
         state.selectedProvider = (haveKey && haveKey.name) || data.default;
         renderPills();
-        if (!haveKey) setStatus('No provider has an API key set yet. Set one of: ' + state.providers.map((p) => p.key_env).filter(Boolean).join(' / '), 'warn');
+        if (!haveKey) showFirstRunHelp();
       } catch (e) { setStatus('Failed to load providers: ' + e.message, 'error'); }
+    }
+
+    function showFirstRunHelp() {
+      // First-run state: no API key set. Instead of a one-liner warning
+      // that vanishes if the user reloads, show a persistent help card
+      // above the editor with copy-paste-ready env var lines and a link
+      // to docs for each provider.
+      const existing = document.getElementById('first-run-help');
+      if (existing) return;
+      const providers = (state.providers || []).filter((p) => p.key_env);
+      const rows = providers.map((p) => {
+        const link = ({
+          claude: 'https://console.anthropic.com/account/keys',
+          openai: 'https://platform.openai.com/api-keys',
+          deepseek: 'https://platform.deepseek.com/api_keys',
+          gemini: 'https://aistudio.google.com/apikey',
+          ollama: 'https://ollama.com (local — no API key)',
+        })[p.name] || '';
+        const linkHtml = link.startsWith('http')
+          ? `<a href="${link}" target="_blank" class="underline text-blue hover:opacity-80">where to get one →</a>`
+          : `<span class="text-ink/60">${escapeHtml(link)}</span>`;
+        return `
+          <tr>
+            <td class="border-2 border-ink px-3 py-2 font-bold uppercase tracking-widest text-xs">${escapeHtml(p.name)}</td>
+            <td class="border-2 border-ink px-3 py-2 font-mono text-xs">
+              <code class="bg-yellow/30 px-2 py-0.5">export ${escapeHtml(p.key_env)}=...</code>
+            </td>
+            <td class="border-2 border-ink px-3 py-2 text-xs">${linkHtml}</td>
+          </tr>`;
+      }).join('');
+      const help = document.createElement('div');
+      help.id = 'first-run-help';
+      help.className = 'border-4 border-ink bg-yellow text-ink p-4 mb-4 shadow-bauhaus-lg';
+      help.innerHTML = `
+        <div class="flex items-start gap-3">
+          <span class="text-2xl">⚠</span>
+          <div class="flex-1">
+            <div class="font-black uppercase tracking-widest text-sm mb-2">Set an API key to start cleaning transcripts</div>
+            <div class="text-xs mb-3">Any one of the keys below works. Set it in your shell, then restart <code class="bg-white px-1">clearscript serve</code>.</div>
+            <table class="w-full border-collapse">${rows}</table>
+            <div class="text-[11px] mt-3 text-ink/70">
+              Tip: keys stay on your machine — clearscript never phones home.
+              For a permanent setup, add the export line to your <code class="bg-white px-1">~/.zshrc</code> or <code class="bg-white px-1">~/.bashrc</code>.
+            </div>
+            <button id="first-run-dismiss" class="mt-3 bauhaus-press border-2 border-ink bg-white text-ink px-3 py-1 text-[11px] font-bold uppercase tracking-widest shadow-bauhaus-sm hover:opacity-80">Dismiss</button>
+          </div>
+        </div>`;
+      const editorView = document.getElementById('view-editor');
+      const insertBefore = editorView ? editorView.firstElementChild : null;
+      if (editorView && insertBefore) editorView.insertBefore(help, insertBefore);
+      else if (editorView) editorView.appendChild(help);
+      document.getElementById('first-run-dismiss').addEventListener(
+        'click',
+        () => help.remove(),
+      );
     }
 
     async function loadVersion() {
@@ -743,6 +858,29 @@
       const transcript = $('transcript-input').value.trim();
       if (!usingBinaryUpload && !transcript) { setStatus('Paste or upload a transcript first.', 'warn'); return; }
       if (!state.selectedProvider) { setStatus('Pick a provider with an API key set.', 'warn'); return; }
+
+      // Pre-flight cost confirmation. The cost preview already runs on
+      // every keystroke; we use the last fetched estimate. If it's above
+      // the soft cap ($0.50 default), require explicit confirmation so a
+      // non-tech user doesn't accidentally burn $50 on a 2-hour
+      // founder-interview through Claude Opus.
+      const COST_SOFT_CAP_USD = parseFloat(
+        localStorage.getItem('clearscript-cost-cap') || '0.50',
+      );
+      const est = state.lastCostEstimate;
+      if (est && est.pricing_known && est.total_cost_usd > COST_SOFT_CAP_USD) {
+        const msg =
+          `This run is estimated at ~$${est.total_cost_usd.toFixed(4)} ` +
+          `(${est.input_tokens.toLocaleString()} in + ~${est.output_tokens_estimate.toLocaleString()} out tokens, ` +
+          `${est.model}).\n\n` +
+          `Your soft cap is $${COST_SOFT_CAP_USD.toFixed(2)}. Proceed?\n\n` +
+          `(Change the cap by running in the console:\n` +
+          `  localStorage.setItem('clearscript-cost-cap', '5.00')\n)`;
+        if (!confirm(msg)) {
+          setStatus('Cancelled — over cost cap.', 'warn');
+          return;
+        }
+      }
 
       hideStatus(); setRunning(true);
       // Reset textarea but keep it active — streaming deltas need to flow in.
@@ -1124,6 +1262,8 @@
         });
         if (!res.ok) { $('cost-preview').classList.add('hidden'); return; }
         const d = await res.json();
+        // Stash the latest estimate so runPipeline() can gate on it.
+        state.lastCostEstimate = d;
         $('cost-preview').classList.remove('hidden');
         $('cost-tokens').textContent = `~${(d.input_tokens || 0).toLocaleString()} in + ${(d.output_tokens_estimate || 0).toLocaleString()} out`;
         if (d.pricing_known) {
@@ -1148,6 +1288,9 @@
       state.suggestions = items;
       state.selectedSuggestions = new Set(items.map((_, i) => i));
       $('suggestions-count').textContent = `(${items.length})`;
+      // A fresh run dropped new suggestions — refresh the persistent
+      // inbox count so the Library tab badge stays in sync.
+      if (typeof refreshInboxBadge === 'function') refreshInboxBadge();
       const list = $('suggestions-list');
       list.innerHTML = '';
       if (!items.length) { $('suggestions-panel').classList.add('hidden'); return; }
@@ -1440,6 +1583,243 @@
       ['add-pattern-title','add-pattern-trigger','add-pattern-action','add-pattern-rationale','add-pattern-domain'].forEach((id) => $(id).value = '');
       $('patterns-add-form').classList.add('hidden');
       loadPatterns(); loadLibStats();
+    }
+
+    // ============ Negatives (do-not-change rules) ============
+    async function loadNegatives() {
+      const data = await (await fetch('/api/library/negatives')).json();
+      const list = $('negatives-list');
+      const rows = data.negatives || [];
+      if (!rows.length) {
+        list.innerHTML = '<p class="text-center text-ink/40 italic py-4">No negatives yet. Add one when the model keeps over-correcting a phrase you want preserved (e.g. 蛮好的, 做事情).</p>';
+        return;
+      }
+      list.innerHTML = '';
+      rows.forEach((n) => {
+        const card = document.createElement('div');
+        card.className = 'border-2 border-ink p-3 bg-white flex items-start justify-between gap-3';
+        const target = n.do_not_change_to
+          ? `→ don't change to <code class="bg-yellow/30 px-1">${escapeHtml(n.do_not_change_to)}</code>`
+          : `<span class="text-ink/50">→ preserve as-is</span>`;
+        card.innerHTML = `
+          <div class="flex-1 text-xs">
+            <div class="font-mono font-bold mb-1">${escapeHtml(n.text)} ${target}</div>
+            ${n.domain ? `<span class="inline-block bg-yellow border-2 border-ink px-2 py-0.5 text-[10px] mr-2">${escapeHtml(n.domain)}</span>` : ''}
+            ${n.reason ? `<span class="text-ink/60 italic">${escapeHtml(n.reason)}</span>` : ''}
+          </div>
+          <button data-id="${n.id}" class="neg-delete-btn text-xs text-red font-bold hover:underline">Delete</button>
+        `;
+        list.appendChild(card);
+      });
+      list.addEventListener('click', async (e) => {
+        if (e.target.classList.contains('neg-delete-btn')) {
+          if (!confirm('Delete this negative rule?')) return;
+          await fetch(`/api/library/negatives/${e.target.dataset.id}`, { method: 'DELETE' });
+          loadNegatives(); loadLibStats();
+        }
+      }, { once: true });
+    }
+    async function addNegative() {
+      const text = $('add-neg-text').value.trim();
+      if (!text) { alert('Text is required'); return; }
+      const body = {
+        text,
+        do_not_change_to: $('add-neg-target').value.trim() || null,
+        domain: $('add-neg-domain').value.trim() || null,
+        reason: $('add-neg-reason').value.trim() || null,
+      };
+      const res = await fetch('/api/library/negatives', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!res.ok) { alert('Save failed: ' + res.statusText); return; }
+      ['add-neg-text','add-neg-target','add-neg-domain','add-neg-reason'].forEach((id) => $(id).value = '');
+      $('negatives-add-form').classList.add('hidden');
+      loadNegatives(); loadLibStats();
+    }
+
+    // ============ Inbox (persistent suggestions across all runs) ============
+    async function loadInbox() {
+      const data = await (await fetch('/api/library/suggestions/inbox')).json();
+      const list = $('inbox-list');
+      const items = data.suggestions || [];
+      $('inbox-count').textContent = `${items.length} pending`;
+      updateInboxBadge(items.length);
+
+      if (!items.length) {
+        list.innerHTML = '<p class="text-center text-ink/40 italic py-4">No pending suggestions. Run a transcript and the model will emit library suggestions here as you go.</p>';
+        return;
+      }
+      list.innerHTML = '';
+      items.forEach((s, idx) => {
+        const card = document.createElement('div');
+        card.className = 'border-2 border-ink p-3 bg-white';
+        const identity = s.canonical || s.canonical_name || s.title || '(unknown)';
+        const aliases = (s.aliases_seen || []).map((a) => `<code class="bg-yellow/30 px-1 mr-1">${escapeHtml(a)}</code>`).join('');
+        const sources = (s.source_slugs || []).slice(0, 3).map((sl) => `<span class="text-[10px] font-mono text-ink/40">${escapeHtml(sl)}</span>`).join(' · ');
+        card.innerHTML = `
+          <div class="flex items-start justify-between gap-3">
+            <div class="flex-1 text-xs">
+              <div class="mb-1">
+                <span class="inline-block bg-ink text-white px-1.5 py-0.5 text-[10px] font-bold uppercase mr-2">${escapeHtml(s.kind || '?')}</span>
+                <span class="font-bold">${escapeHtml(identity)}</span>
+                ${s.type ? `<span class="ml-2 text-ink/50">(${escapeHtml(s.type)})</span>` : ''}
+                ${s.domain ? `<span class="ml-2 bg-yellow border-2 border-ink px-1.5 py-0.5 text-[9px]">${escapeHtml(s.domain)}</span>` : ''}
+                ${s.times_seen > 1 ? `<span class="ml-2 bg-red text-white px-1.5 py-0.5 text-[9px] font-bold">×${s.times_seen}</span>` : ''}
+              </div>
+              ${aliases ? `<div class="mb-1 text-ink/70">aliases seen: ${aliases}</div>` : ''}
+              ${sources ? `<div class="text-ink/40">from: ${sources}</div>` : ''}
+            </div>
+            <div class="flex flex-col gap-1">
+              <button data-idx="${idx}" class="inbox-accept-btn bauhaus-press border-2 border-ink bg-yellow text-ink px-3 py-1 text-[10px] font-bold uppercase tracking-widest">✓ Accept</button>
+              <button data-idx="${idx}" class="inbox-reject-btn bauhaus-press border-2 border-ink bg-white text-ink px-3 py-1 text-[10px] font-bold uppercase tracking-widest hover:bg-red hover:text-white">✗ Dismiss</button>
+            </div>
+          </div>
+        `;
+        list.appendChild(card);
+      });
+      state.inboxItems = items;
+      list.addEventListener('click', async (e) => {
+        const idx = e.target.dataset.idx;
+        if (idx === undefined) return;
+        const item = state.inboxItems[Number(idx)];
+        if (!item) return;
+        if (e.target.classList.contains('inbox-accept-btn')) {
+          await fetch('/api/library/accept-suggestions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ suggestions: [item] }),
+          });
+          loadInbox(); loadLibStats();
+        } else if (e.target.classList.contains('inbox-reject-btn')) {
+          await fetch('/api/library/suggestions/inbox/dismiss', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ kind: item.kind, identity: item.canonical || item.canonical_name || item.title }),
+          });
+          loadInbox();
+        }
+      }, { once: true });
+    }
+    async function acceptAllInbox() {
+      const items = state.inboxItems || [];
+      if (!items.length) return;
+      if (!confirm(`Accept all ${items.length} pending suggestions into your library?`)) return;
+      await fetch('/api/library/accept-suggestions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ suggestions: items }),
+      });
+      loadInbox(); loadLibStats();
+    }
+    function updateInboxBadge(n) {
+      const badge = $('inbox-badge');
+      if (n > 0) {
+        badge.textContent = String(n);
+        badge.classList.remove('hidden');
+      } else {
+        badge.classList.add('hidden');
+      }
+    }
+    async function refreshInboxBadge() {
+      // Cheap lightweight ping for just the count — used on boot and
+      // after each Run so the Library tab's Inbox button shows fresh
+      // numbers without needing to switch tabs.
+      try {
+        const res = await fetch('/api/library/suggestions/inbox');
+        if (!res.ok) return;
+        const data = await res.json();
+        updateInboxBadge(data.count || 0);
+      } catch (e) { /* ignore */ }
+    }
+
+    // ============ Health ============
+    async function loadHealth() {
+      const data = await (await fetch('/api/library/health?stale_days=90')).json();
+      const body = $('health-body');
+      const s = data.summary || {};
+      $('health-summary').textContent =
+        `${s.duplicate_alias_groups} dup-aliases · ${s.duplicate_canonical_groups} dup-canonicals · ` +
+        `${s.low_confidence_count} low-conf · ${s.stale_count} stale · ${s.orphan_alias_count} orphans`;
+
+      const sections = [];
+
+      if ((data.duplicate_aliases || []).length) {
+        sections.push(renderHealthSection(
+          'Duplicate aliases (one alias → multiple canonicals)',
+          'red',
+          'These cause non-deterministic lookups. Resolve by deleting one of the conflicting terms.',
+          data.duplicate_aliases.map((d) => `
+            <div class="border-2 border-ink p-2 text-xs font-mono">
+              <span class="bg-red text-white px-1.5 py-0.5 mr-2">${escapeHtml(d.alias)}</span>
+              → ${escapeHtml(d.canonicals)} <span class="text-ink/50 ml-2">×${d.n}</span>
+            </div>
+          `).join(''),
+        ));
+      }
+
+      if ((data.duplicate_canonicals || []).length) {
+        sections.push(renderHealthSection(
+          'Duplicate canonicals',
+          'yellow',
+          'Same canonical added multiple times. Merge or delete duplicates.',
+          data.duplicate_canonicals.map((d) => `
+            <div class="border-2 border-ink p-2 text-xs font-mono">
+              ${escapeHtml(d.canonical)} <span class="text-ink/50 ml-2">×${d.n}</span>
+            </div>
+          `).join(''),
+        ));
+      }
+
+      if ((data.low_confidence_terms || []).length) {
+        sections.push(renderHealthSection(
+          'Low-confidence terms (< 0.3)',
+          'yellow',
+          'Probably accidental Mode B accepts. Review and reject if not useful.',
+          '<div class="grid grid-cols-1 md:grid-cols-2 gap-2">' +
+          data.low_confidence_terms.slice(0, 40).map((d) => `
+            <div class="border-2 border-ink p-2 text-xs flex items-center justify-between">
+              <span>
+                <span class="font-bold">${escapeHtml(d.canonical)}</span>
+                ${d.type ? `<span class="text-ink/50 ml-1">(${escapeHtml(d.type)})</span>` : ''}
+              </span>
+              <span class="font-mono text-ink/60">${d.confidence.toFixed(2)}</span>
+            </div>
+          `).join('') + '</div>',
+        ));
+      }
+
+      if ((data.stale_terms || []).length) {
+        sections.push(renderHealthSection(
+          `Stale terms (no use in ${data.stale_days_threshold}+ days)`,
+          'blue',
+          'Candidates for archival if you\'re doing library cleanup.',
+          '<div class="grid grid-cols-1 md:grid-cols-2 gap-2">' +
+          data.stale_terms.slice(0, 40).map((d) => `
+            <div class="border-2 border-ink p-2 text-xs flex items-center justify-between">
+              <span>
+                <span class="font-bold">${escapeHtml(d.canonical)}</span>
+                ${d.type ? `<span class="text-ink/50 ml-1">(${escapeHtml(d.type)})</span>` : ''}
+              </span>
+              <span class="font-mono text-ink/60">${d.last_used_at || 'never used'}</span>
+            </div>
+          `).join('') + '</div>',
+        ));
+      }
+
+      if (!sections.length) {
+        body.innerHTML = '<div class="text-center py-8 text-ink/60"><span class="text-2xl">✓</span><br><span class="font-bold uppercase tracking-widest text-xs">Library is healthy</span><br><span class="text-xs">No duplicates, low-confidence terms, or stale entries.</span></div>';
+        return;
+      }
+      body.innerHTML = sections.join('');
+    }
+
+    function renderHealthSection(title, color, hint, content) {
+      const colorMap = { red: 'bg-red text-white', yellow: 'bg-yellow text-ink', blue: 'bg-blue text-white' };
+      return `
+        <div class="border-2 border-ink">
+          <div class="${colorMap[color]} px-3 py-2 text-xs font-bold uppercase tracking-widest">${title}</div>
+          <div class="px-3 py-2 text-[11px] text-ink/60 italic border-b-2 border-ink/20">${hint}</div>
+          <div class="p-3 space-y-2">${content}</div>
+        </div>
+      `;
     }
 
     // ============ Projects ============
@@ -1820,6 +2200,17 @@
       // Library: patterns
       $('patterns-add-btn').addEventListener('click', () => $('patterns-add-form').classList.toggle('hidden'));
       $('patterns-add-submit').addEventListener('click', addPattern);
+
+      // Negatives + Inbox + Health
+      $('negatives-add-btn').addEventListener('click', () => $('negatives-add-form').classList.toggle('hidden'));
+      $('negatives-add-submit').addEventListener('click', addNegative);
+      $('inbox-refresh').addEventListener('click', loadInbox);
+      $('inbox-accept-all').addEventListener('click', acceptAllInbox);
+      $('health-refresh').addEventListener('click', loadHealth);
+
+      // Refresh the inbox count badge once on boot + every time the
+      // suggestions panel from a Run is rendered. Cheap call (single GET).
+      refreshInboxBadge();
 
       // Projects
       $('projects-refresh-btn').addEventListener('click', loadProjects);

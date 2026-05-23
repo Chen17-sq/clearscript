@@ -83,13 +83,24 @@ class CapturingProvider:
 def loop_client(tmp_path, monkeypatch):
     cfg_dir = tmp_path / "config"
     data_dir = tmp_path / "data"
+    projects_root = tmp_path / "projects"
     cfg_dir.mkdir()
     data_dir.mkdir()
+    projects_root.mkdir()
+    cfg_file = cfg_dir / "config.toml"
     monkeypatch.setattr("clearscript.config.CONFIG_DIR", cfg_dir)
     monkeypatch.setattr("clearscript.config.DATA_DIR", data_dir)
-    monkeypatch.setattr("clearscript.config.CONFIG_FILE", cfg_dir / "config.toml")
+    monkeypatch.setattr("clearscript.config.CONFIG_FILE", cfg_file)
     monkeypatch.setattr(
         "clearscript.config.PROVIDERS_FILE", cfg_dir / "providers.toml"
+    )
+    # Config's projects_root default uses Path.home() — not DATA_DIR — so we
+    # have to override it via a config.toml file to keep tests off the user's
+    # real ~/Documents/clearscript/projects directory.
+    cfg_file.write_text(
+        f'projects_root = "{projects_root}"\n'
+        f'library_path = "{data_dir / "library" / "library.db"}"\n',
+        encoding="utf-8",
     )
 
     provider = CapturingProvider()

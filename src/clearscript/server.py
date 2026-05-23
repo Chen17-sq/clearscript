@@ -1208,6 +1208,160 @@ def create_app() -> FastAPI:
         finally:
             lib.close()
 
+    # ============ Persistent suggestions inbox ============
+    #
+    # Mode B emits suggestions per-run, persisted as suggestions.json under
+    # each project. Without aggregation, a user who runs 10 transcripts has
+    # to drill into each project to harvest. The inbox endpoint walks all
+    # projects, merges suggestions by (kind, canonical/canonical_name/title),
+    # filters out ones already in the library, and tracks per-user
+    # dismissals via a small JSON sidecar in DATA_DIR.
+
+    def _dismissed_path() -> Path:
+        return cfg().library_path.parent / "dismissed_suggestions.json"
+
+    def _read_dismissed() -> set[tuple[str, str]]:
+        p = _dismissed_path()
+        if not p.is_file():
+            return set()
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+            return {(d["kind"], d["identity"]) for d in data}
+        except (json.JSONDecodeError, OSError, KeyError):
+            return set()
+
+    def _write_dismissed(items: set[tuple[str, str]]) -> None:
+        _dismissed_path().write_text(
+            json.dumps(
+                [{"kind": k, "identity": i} for k, i in sorted(items)],
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+    def _suggestion_identity(s: dict) -> str | None:
+        ident = (
+            s.get("canonical")
+            or s.get("canonical_name")
+            or s.get("title")
+            or ""
+        )
+        return str(ident).strip() or None
+
+    def _already_in_library(lib: Library, s: dict) -> bool:
+        kind = str(s.get("kind", "")).lower()
+        if kind == "term":
+            canonical = (s.get("canonical") or "").strip()
+            if not canonical:
+                return False
+            return lib.lookup_alias(canonical) is not None
+        if kind == "speaker":
+            canonical = (s.get("canonical_name") or "").strip()
+            if not canonical:
+                return False
+            return lib.lookup_speaker(canonical) is not None
+        # Patterns are harder to detect dupes for; treat them as never in
+        # library (user can dismiss explicitly).
+        return False
+
+    @app.get("/api/library/suggestions/inbox")
+    def suggestions_inbox() -> dict:
+        """Aggregate pending suggestions across every project.
+
+        For each unique (kind, identity) we collect:
+        - the suggestion fields (canonical, aliases_seen, etc.)
+        - ``times_seen``: how many runs surfaced this one
+        - ``source_slugs``: which projects suggested it (last 5)
+        Already-in-library and explicitly-dismissed suggestions are excluded.
+        """
+        store = ProjectStore(cfg().projects_root)
+        dismissed = _read_dismissed()
+        merged: dict[tuple[str, str], dict] = {}
+
+        lib = open_library()
+        try:
+            for summary in store.list_summaries(limit=1000):
+                slug = summary["slug"]
+                project = store.open(slug)
+                if not project.suggestions_path.is_file():
+                    continue
+                try:
+                    items = json.loads(
+                        project.suggestions_path.read_text(encoding="utf-8")
+                    )
+                except (json.JSONDecodeError, OSError):
+                    continue
+                if not isinstance(items, list):
+                    continue
+                for s in items:
+                    if not isinstance(s, dict):
+                        continue
+                    kind = str(s.get("kind", "")).lower()
+                    identity = _suggestion_identity(s)
+                    if not kind or not identity:
+                        continue
+                    key = (kind, identity.lower())
+                    if key in dismissed:
+                        continue
+                    if _already_in_library(lib, s):
+                        continue
+                    if key in merged:
+                        existing = merged[key]
+                        existing["times_seen"] = (existing.get("times_seen") or 1) + 1
+                        existing_slugs = existing.setdefault("source_slugs", [])
+                        if slug not in existing_slugs:
+                            existing_slugs.append(slug)
+                        # Union aliases_seen if both have them.
+                        new_aliases = s.get("aliases_seen") or []
+                        if new_aliases:
+                            seen = set(existing.get("aliases_seen") or [])
+                            for a in new_aliases:
+                                if a not in seen:
+                                    existing.setdefault("aliases_seen", []).append(a)
+                                    seen.add(a)
+                    else:
+                        merged[key] = {
+                            **s,
+                            "kind": kind,
+                            "times_seen": 1,
+                            "source_slugs": [slug],
+                        }
+        finally:
+            lib.close()
+
+        # Sort: most-seen first, then alphabetic for stability.
+        out = sorted(
+            merged.values(),
+            key=lambda x: (-(x.get("times_seen") or 0), str(_suggestion_identity(x) or "").lower()),
+        )
+        return {"suggestions": out, "count": len(out)}
+
+    @app.post("/api/library/suggestions/inbox/dismiss")
+    def suggestions_inbox_dismiss(payload: dict) -> dict:
+        """Mark a (kind, identity) pair as dismissed so it stops appearing
+        in the inbox. The user can still find it in the source project's
+        suggestions.json — dismissal only affects the inbox view.
+        """
+        kind = str(payload.get("kind", "")).lower().strip()
+        identity = str(payload.get("identity", "")).strip()
+        if not kind or not identity:
+            raise HTTPException(400, "kind and identity are required")
+        dismissed = _read_dismissed()
+        dismissed.add((kind, identity.lower()))
+        _write_dismissed(dismissed)
+        return {"dismissed_count": len(dismissed)}
+
+    @app.delete("/api/library/suggestions/inbox/dismissed", status_code=204)
+    def suggestions_inbox_clear_dismissals() -> Response:
+        """Reset the dismissed-suggestions set — used when the user wants
+        to re-review everything (e.g. after a library cleanup).
+        """
+        p = _dismissed_path()
+        if p.is_file():
+            p.unlink()
+        return Response(status_code=204)
+
     @app.post("/api/library/accept-suggestions")
     def accept_suggestions(req: AcceptSuggestionsRequest) -> dict:
         lib = open_library()
