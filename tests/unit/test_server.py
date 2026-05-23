@@ -302,10 +302,13 @@ def test_run_happy_path(app_client) -> None:
     assert body["model"]
     assert body["provider"] == "stub"
     assert body["project_slug"]  # saved to disk
-    assert body["input_tokens"] == 120
-    assert body["output_tokens"] == 80
-    # The provider was actually invoked.
-    assert len(stub.calls) >= 1
+    # Token counts include both the main edit pass AND self-review (the
+    # 2nd LLM call on the stitched output). StubProvider returns
+    # 120/80 per call, so 2 calls = 240/160.
+    assert body["input_tokens"] == 240
+    assert body["output_tokens"] == 160
+    # The provider was actually invoked at least twice (edit + self-review).
+    assert len(stub.calls) >= 2
 
 
 def test_run_rejects_empty_transcript(app_client) -> None:

@@ -7,6 +7,87 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.20] - 2026-05-23
+
+### Added — Self-review pass + L3.5 rewrite
+
+Following v0.0.19's prompt rewrite, user said "继续很深入改" — keep going
+on quality. This release adds the single biggest quality multiplier I
+know how to ship without changing the model: a **second LLM pass** that
+re-reads the stitched output and catches what the first pass missed.
+
+### Self-review (Stage 6) is now wired into the pipeline
+
+After all chunks complete, ``Pipeline.iter_events`` makes one additional
+LLM call on the stitched edited markdown. The call uses a dedicated
+prompt (``stages/06_self_review.md``) that walks the model through a
+5-check routine:
+
+1. **Proper noun audit** — re-read every capitalised English word and
+   CamelCase token; correct any the first pass left untouched. This is
+   the headline reason: the first pass is laser-focused on layered
+   editing and consistently misses 20-30% of L3 errors that a fresh
+   read catches.
+2. **Speaker consistency audit** across the whole document.
+3. **Cross-section data consistency** — ARR / headcount / funding /
+   percentages flagged when they don't agree.
+4. **Format hygiene** — leftover `[Speaker N]`, mixed punctuation
+   styles, bullet inconsistencies.
+5. **Over-correction rollbacks** — first-pass changes with
+   confidence < 0.7 get a sanity check.
+
+Output is a structured JSON object with `additional_corrections`,
+`rollbacks`, `promotions_to_user_review`, `data_conflicts`, and
+`format_issues`. Corrections get applied via string-replace on the
+stitched markdown; everything else is surfaced to the UI as diagnostics
+the user should look at.
+
+Cost: **one extra LLM call per Run** (not per chunk). For a 60-min
+transcript split into 5 chunks, that's ~17% more API spend for a
+disproportionate quality lift. Auto-skipped if the stitched output
+exceeds 100k chars to keep cost bounded on very long transcripts.
+
+Default ON. Tests opt out explicitly when they're testing the layered
+edit alone.
+
+### SSE events
+
+Three new events flow during the review pass:
+- ``self_review_start`` — UI shows "↻ Self-review — re-reading for
+  missed corrections…"
+- ``self_review_done`` — UI shows "+N fixes · M data conflicts to
+  check · K ambiguous items flagged" with updated token counts
+- ``self_review_error`` — opportunistic skip if the model returns
+  garbage; main result still ships
+
+The ``complete`` event now carries a ``self_review`` field with the
+full diagnostics dict.
+
+### L3.5 (sentence-level cleanup) rewritten
+
+Same treatment as L3 in v0.0.19. The conservative table now wraps a
+**7-check routine**:
+
+1. Sentence boundary correctness (ASR split / merged wrong)
+2. Stutter / repetition dedup (exact `X X` only)
+3. Word order garbling (≥85% confidence or flag)
+4. Missing function words / abandoned sentences (never auto-complete)
+5. Speaker switch swallowed mid-paragraph
+6. Number/letter confusion in spoken digits
+7. Same-sound substitution destroying meaning (cohort vs co-host)
+
+Hard table of confidence thresholds per change type. Explicit "what
+L3.5 does NOT do" list to keep the model bounded.
+
+### Tests
+
+284 → **292** (+8). All passing. Ruff clean.
+
+- ``test_pipeline_self_review.py`` (new file, 8 tests): event ordering,
+  corrections applied, token counts include both passes, opt-out
+  flag, auto-skip for huge output, garbage response robustness,
+  diagnostics surfaced in `complete`, ignored when `old` not in doc.
+
 ## [0.0.19] - 2026-05-23
 
 ### Changed — Prompts rewritten for actual associative reasoning

@@ -1483,6 +1483,36 @@
                 $('progress-changes').textContent = accumulatedChanges.toLocaleString();
                 break;
               }
+              case 'self_review_start': {
+                // Second pass on the stitched output to catch missed
+                // corrections. Show a distinct label so the user knows
+                // why their token count is still climbing after all chunks
+                // finished.
+                $('progress-label').textContent = '↻ Self-review — re-reading for missed corrections…';
+                $('progress-fill').style.width = '95%';
+                break;
+              }
+              case 'self_review_done': {
+                const adds = event.data.additional_changes || 0;
+                const conflicts = event.data.data_conflicts || 0;
+                const promotions = event.data.promotions || 0;
+                $('progress-label').textContent =
+                  `Review done — +${adds} fixes` +
+                  (conflicts ? ` · ${conflicts} data conflicts to check` : '') +
+                  (promotions ? ` · ${promotions} ambiguous items flagged` : '');
+                totalTokensIn += event.data.input_tokens || 0;
+                totalTokensOut += event.data.output_tokens || 0;
+                $('progress-tokens-in').textContent = totalTokensIn.toLocaleString();
+                $('progress-tokens-out').textContent = totalTokensOut.toLocaleString();
+                accumulatedChanges += adds;
+                $('progress-changes').textContent = accumulatedChanges.toLocaleString();
+                break;
+              }
+              case 'self_review_error': {
+                $('progress-label').textContent =
+                  'Review skipped (' + (event.data.detail || 'unknown') + ') — main edit OK';
+                break;
+              }
               case 'complete': {
                 finalPayload = event.data;
                 $('progress-fill').style.width = '100%';

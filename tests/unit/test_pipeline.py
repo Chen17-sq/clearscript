@@ -33,7 +33,12 @@ def test_pipeline_runs_end_to_end(tmp_path: Path, mock_provider) -> None:
         encoding="utf-8",
     )
 
-    pipeline = Pipeline(provider=mock_provider, model="mock-model")
+    # Self-review is exercised in test_pipeline_self_review.py; disable
+    # here so the token-count + change_log assertions reflect just the
+    # main edit pass.
+    pipeline = Pipeline(
+        provider=mock_provider, model="mock-model", enable_self_review=False
+    )
     result = pipeline.run(input_path)
 
     assert "Speaker 1：" in result.edited_markdown

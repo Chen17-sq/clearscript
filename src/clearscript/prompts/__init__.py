@@ -105,4 +105,24 @@ def compose_bootstrap_prompt() -> str:
     )
 
 
-__all__ = ["compose_bootstrap_prompt", "compose_edit_prompt", "load_prompt"]
+def compose_self_review_prompt() -> str:
+    """Compose the system prompt for the Self-Review stage.
+
+    Self-review takes the layered-edit output and looks for missed
+    proper-noun corrections, speaker inconsistencies, cross-section
+    data conflicts, format residue, and over-corrections. Runs as a
+    single second-pass LLM call on the stitched output (not per-chunk).
+    """
+    return (
+        load_prompt("system_base")
+        + "\n\n---\n\n"
+        + load_prompt("stages/06_self_review")
+    )
+
+
+__all__ = [
+    "compose_bootstrap_prompt",
+    "compose_edit_prompt",
+    "compose_self_review_prompt",
+    "load_prompt",
+]

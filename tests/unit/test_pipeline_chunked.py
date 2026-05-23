@@ -79,7 +79,10 @@ def test_long_transcript_triggers_multi_chunk(tmp_path: Path) -> None:
     _write_long_transcript(input_path)
 
     provider = RotatingMockProvider()
-    pipeline = Pipeline(provider=provider, model="mock-1")
+    # Self-review adds an extra LLM call after all chunks; disable here so
+    # the chunk-count assertions stay clean. Self-review is exercised in
+    # its own test module.
+    pipeline = Pipeline(provider=provider, model="mock-1", enable_self_review=False)
     result = pipeline.run(input_path)
 
     # Should have made multiple LLM calls
@@ -100,7 +103,7 @@ def test_short_transcript_stays_single_chunk(tmp_path: Path) -> None:
     input_path.write_text("Speaker 1: hi.\nSpeaker 2: hello.", encoding="utf-8")
 
     provider = RotatingMockProvider()
-    pipeline = Pipeline(provider=provider, model="mock-1")
+    pipeline = Pipeline(provider=provider, model="mock-1", enable_self_review=False)
     result = pipeline.run(input_path)
 
     assert provider.call_count == 1
