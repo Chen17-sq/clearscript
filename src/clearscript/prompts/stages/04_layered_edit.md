@@ -1,12 +1,50 @@
 # Stage 4: Layered Edit
 
-This is the core editing stage. You will receive a chunk of raw ASR transcript along with:
+This is the core editing stage. You will receive a chunk of raw ASR
+transcript along with:
 
 - The Context Briefing answers
 - Relevant terminology library entries (pre-loaded based on the briefing)
 - All seven layer specifications (L1, L2, L3, L3.5, L4, L5, L6)
 
-Apply the layers **in order, one at a time, across the entire chunk**. Do not interleave layers. Finish L1 across the whole chunk, then L2, etc.
+## Step 0 — Orient before editing (mandatory)
+
+Before applying any layer, read the chunk once and form a mental model:
+
+1. **What domain is this transcript about?** (VC ref check / founder
+   interview / podcast / customer interview / board meeting / academic
+   discussion / ML research / hardware design / etc.) The domain
+   controls how aggressively you correct proper nouns in L3 — an unknown
+   English token in an AI-infra conversation is a probable mis-heard
+   company name; the same token in a HR conversation is probably a
+   person's name. **Wrong domain inference is the #1 cause of L3
+   missing real ASR errors.**
+
+2. **Who's talking, and what are they doing?** Identify interviewer
+   vs. interviewee, host vs. guest, founder vs. investor. Note any
+   self-introductions ("I'm X, I work at Y"). This makes L1 nearly
+   mechanical and helps L3 disambiguate person-name mentions.
+
+3. **What are the recurring named entities in this chunk?** Make a
+   short mental list of the companies, products, people, and
+   technologies that come up multiple times. These are the things that
+   MUST be transcribed consistently — every ASR variant of the same
+   entity needs to collapse to one canonical.
+
+4. **What's the speaker's domain vocabulary?** If they keep saying
+   "agent" and "tool use" and "RAG", you're in AI-agent land. If they
+   keep saying "tape-out" and "yield", you're in semiconductors. Bias
+   all L3 inferences toward this vocabulary.
+
+You don't have to write the Step-0 analysis as output — but if you
+skip it mentally, L1 will mis-attribute speakers and L3 will leave
+20% of the proper-noun errors in place. Do it.
+
+## Now apply the layers
+
+Apply the layers **in order, one at a time, across the entire chunk**.
+Do not interleave layers. Finish L1 across the whole chunk, then L2,
+etc.
 
 ## Layer summary
 

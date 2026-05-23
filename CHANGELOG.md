@@ -7,6 +7,88 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.19] - 2026-05-23
+
+### Changed — Prompts rewritten for actual associative reasoning
+
+User feedback after v0.0.18: *"我感觉现在的能力还是很差，就很多东西你
+联想不到去进行逐字稿的修改"*. They were right — the L3 (ASR fix) prompt
+said "be proactive" but didn't give the model a routine to follow, and
+the library context was just listed at the bottom without telling the
+model to actively cross-reference. Literal transcription quality only
+needs ChatGPT; the value of clearscript is the associative leaps a
+context-aware editor makes ("Tabby in an AI-infra discussion is
+phonetically Tavily"), and the prompts weren't pushing for those.
+
+### What changed
+
+**``system_base.md``** — opens with "The user is paying you for
+**associative reasoning** that a literal transcript can't deliver". The
+"zero hallucination" rule now explicitly distinguishes content
+hallucination from transcription repair (correcting Tabby → Tavily
+with reasoning is not hallucination). A new "Use the supplied library
+aggressively" section primes the model to walk through the library
+mappings BEFORE reading the transcript.
+
+**``layers/l3_asr_fix.md``** — completely rewritten. New mandatory
+3-step routine:
+
+1. **Identify the domain** (VC / AI infra / foundation models /
+   embodied AI / RL / GTM / semiconductors / 3D — with concrete
+   keyword cues for each)
+2. **Scan for ASR-suspicious tokens** (capitalised English in Chinese
+   sentences, CamelCase oddities, numbers-as-letters, acronyms that
+   don't fit, mid-sentence proper nouns that break topic flow)
+3. **Cross-reference the library + apply phonetic patterns**
+
+Plus a much-expanded phonetic similarity table covering both Mandarin
+homophone confusions (具身 → 巨身 / 据身 / 居室) and English ASR
+confusions in code-switched Chinese transcripts (Tabby/Tably/Tabli
+→ Tavily, Minus → Manus, DeFi/Difan/底牌 → Dify, iShopee → Anthropic,
+MAM-9/妈姆9 → Mem0, PinkCup → PingCAP, Nubians → Nebius, etc.) — 25+
+concrete patterns the model can pattern-match against.
+
+The prompt now ends with a hard discipline statement: **"You should
+be making 3-15 L3 corrections per minute of transcript. If you finish
+a 60-minute transcript with zero L3 changes, you almost certainly
+missed something."**
+
+**``layers/l1_speaker.md``** — beefed up with a 4-step routine for
+inferring speakers from content (count distinct speakers, infer
+interviewer-vs-interviewee from turn length and content, catch
+self-introductions, consolidate ASR-over-split speakers). The example
+now shows merging Speaker 2 and Speaker 3 when content + role match.
+
+**``stages/04_layered_edit.md``** — new "Step 0: Orient before editing"
+section forcing the model to identify domain, speakers, recurring
+entities, and domain vocabulary BEFORE applying any layer. Called out
+as "the #1 cause of L3 missing real ASR errors" when skipped.
+
+**``pipeline.py``** — ``_collect_library_context`` now emits a full
+vocabulary primer at the top (every canonical + every alias, capped at
+200), regardless of whether the entity appears in the current chunk.
+This lets the model do phonetic matching against the user's vocabulary
+even for novel ASR misspellings the entity extractor wouldn't catch.
+
+**``prompts/__init__.py``** — the briefing and library context sections
+in the composed system prompt now have explicit framing telling the
+model HOW to use them ("**Use it to bias your proper-noun corrections.**"
+and "**APPLY AGGRESSIVELY**" — not just listing the data).
+
+### Tests
+
+284 still passing. Ruff clean. Two existing prompt-composition tests
+were updated to match new heading text.
+
+### Caveat
+
+Prompt quality has a ceiling per model. For users on
+``deepseek-v4-flash`` (the streaming-friendly default), upgrade to
+``deepseek-v4-pro`` or ``claude-sonnet-4-6`` for hard transcripts —
+the routine in L3 is more taxing than v4-flash can fully execute.
+Setting the model is one click in ⚙ Keys → or pass ``--model
+deepseek-v4-pro`` on the CLI.
+
 ## [0.0.18] - 2026-05-23
 
 ### Added — Library Bootstrap: the answer to "why not just ChatGPT?"

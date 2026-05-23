@@ -58,11 +58,32 @@ def compose_edit_prompt(briefing_context: str = "", library_context: str = "") -
 
     if briefing_context:
         parts.append("---\n\n## Session briefing (user-provided)\n\n")
+        parts.append(
+            "This is what the user told you about this transcript. "
+            "**Use it to bias your proper-noun and acronym corrections.** "
+            "If the briefing says the speaker is an AI infra founder, then "
+            "weird mid-sentence English nouns should be checked against "
+            "known AI infra companies first. If the briefing names a "
+            "specific person, that person is likely the speaker on every "
+            "turn where context fits.\n\n"
+        )
         parts.append(briefing_context)
         parts.append("\n\n")
 
     if library_context:
-        parts.append("---\n\n## Library hints for this chunk\n\n")
+        parts.append("---\n\n## Your terminology library — APPLY AGGRESSIVELY\n\n")
+        parts.append(
+            "These are the user's confirmed canonicals and aliases. **The "
+            "transcript almost certainly contains the alias forms** — that's "
+            "literally what the library is for. Walk through this list "
+            "before reading the transcript, then look for each alias as "
+            "you read.\n\n"
+            "When you find an alias, the correction is MANDATORY (confidence "
+            "0.99). When you see something that sounds similar to a listed "
+            "canonical but isn't quite a listed alias, apply the correction "
+            "anyway AND add the new alias to SUGGESTIONS so the library "
+            "grows.\n\n"
+        )
         parts.append(library_context)
         parts.append("\n\n")
 

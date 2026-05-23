@@ -40,10 +40,13 @@ def test_compose_includes_all_layers() -> None:
     assert "briefing-x" in prompt
     assert "library-y" in prompt
     assert "## Session briefing" in prompt
-    assert "## Library hints" in prompt
+    # The library context section was reworded for stronger framing —
+    # match the new heading.
+    assert "terminology library" in prompt.lower()
 
 
 def test_compose_omits_empty_context() -> None:
     prompt = compose_edit_prompt()
     assert "## Session briefing" not in prompt
-    assert "## Library hints" not in prompt
+    # The new heading is "Your terminology library — APPLY AGGRESSIVELY".
+    assert "Your terminology library" not in prompt

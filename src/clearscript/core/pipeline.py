@@ -414,6 +414,36 @@ class Pipeline:
         briefing_speaker_lines: list[str] = []
         max_term_lines = 60
 
+        # PRIMER: dump the full vocabulary (canonical + every alias) at the
+        # top of the library context. Without this, if the transcript says
+        # "Tabbey" (a NEW misspelling) and the library only has "Tabby" as
+        # alias of "Tavily", the entity-matcher below would miss it. With
+        # the full vocab primed, the model can do the phonetic match
+        # itself. Capped at 200 lines to bound prompt size — that's enough
+        # for most working libraries without blowing the context budget.
+        vocab_lines: list[str] = []
+        try:
+            all_terms = self.library.list_terms(limit=200)
+        except Exception:
+            all_terms = []
+        for t in all_terms:
+            if t.get("status") == "deprecated":
+                continue
+            canonical = t.get("canonical")
+            if not canonical:
+                continue
+            aliases = t.get("aliases") or []
+            alias_str = ", ".join(f"`{a}`" for a in aliases) if aliases else "—"
+            type_str = f" [{t.get('type')}]" if t.get("type") else ""
+            vocab_lines.append(f"- **{canonical}**{type_str} ← {alias_str}")
+        if vocab_lines:
+            sections.append(
+                "Your full vocabulary (canonical ← known ASR variants). "
+                "Watch for any of these forms — AND any phonetic neighbours "
+                "of these canonicals — in the transcript:\n"
+                + "\n".join(vocab_lines)
+            )
+
         speaker_lines: list[str] = []
         for spk in transcript.detected_speakers:
             hit = self.library.lookup_speaker(spk)
