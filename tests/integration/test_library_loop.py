@@ -97,9 +97,11 @@ def loop_client(tmp_path, monkeypatch):
     # Config's projects_root default uses Path.home() — not DATA_DIR — so we
     # have to override it via a config.toml file to keep tests off the user's
     # real ~/Documents/clearscript/projects directory.
+    # TOML literal strings (single-quoted) so Windows backslash paths don't
+    # blow up the parser with "Invalid hex value" on \U... sequences.
     cfg_file.write_text(
-        f'projects_root = "{projects_root}"\n'
-        f'library_path = "{data_dir / "library" / "library.db"}"\n',
+        f"projects_root = '{projects_root}'\n"
+        f"library_path = '{data_dir / 'library' / 'library.db'}'\n",
         encoding="utf-8",
     )
 

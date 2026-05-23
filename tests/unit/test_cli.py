@@ -67,9 +67,11 @@ def cli_env(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "clearscript.config.PROVIDERS_FILE", cfg_dir / "providers.toml"
     )
+    # TOML literal strings (single-quoted) so Windows backslash paths don't
+    # blow up the parser with "Invalid hex value" on \U... sequences.
     cfg_file.write_text(
-        f'projects_root = "{projects_root}"\n'
-        f'library_path = "{data_dir / "library" / "library.db"}"\n',
+        f"projects_root = '{projects_root}'\n"
+        f"library_path = '{data_dir / 'library' / 'library.db'}'\n",
         encoding="utf-8",
     )
     monkeypatch.setattr("clearscript.cli.build_provider", lambda _c: CliMockProvider())

@@ -105,9 +105,13 @@ def app_client(tmp_path, monkeypatch):
     # Override projects_root via the config TOML — Config's default_factory
     # for projects_root uses Path.home() directly, so we can't redirect it
     # purely with attribute patches.
+    # Use TOML literal strings (single-quoted) so Windows backslashes in
+    # paths don't get interpreted as escape sequences. \U... in
+    # "C:\Users\..." otherwise triggers "Invalid hex value" on the CI
+    # Windows runner.
     cfg_file.write_text(
-        f'projects_root = "{projects_root}"\n'
-        f'library_path = "{data_dir / "library" / "library.db"}"\n',
+        f"projects_root = '{projects_root}'\n"
+        f"library_path = '{data_dir / 'library' / 'library.db'}'\n",
         encoding="utf-8",
     )
 
