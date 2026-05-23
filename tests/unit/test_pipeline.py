@@ -227,6 +227,73 @@ def test_pipeline_mode_c_propagates_substitutions_across_chunks(
     assert "Tavily" in chunk2_system
 
 
+def test_pipeline_split_output_returns_raw_when_no_delimiters() -> None:
+    """If the model ignores the format instructions, we must still extract
+    the cleaned text without crashing — empty changelog/suggestions is
+    better than a 500.
+    """
+    edited, changelog, suggestions = Pipeline._split_output("just some text\nno delimiters")
+    assert edited == "just some text\nno delimiters"
+    assert changelog == []
+    assert suggestions == []
+
+
+def test_pipeline_split_output_handles_malformed_json_changelog() -> None:
+    """JSON parse failure in the changelog section must not propagate."""
+    text = (
+        "Cleaned\n"
+        "---CHANGELOG---\n"
+        "{this is not valid json\n"
+        "---SUGGESTIONS---\n"
+        "[]"
+    )
+    edited, changelog, suggestions = Pipeline._split_output(text)
+    assert edited == "Cleaned"
+    assert changelog == []
+    assert suggestions == []
+
+
+def test_pipeline_split_output_filters_non_dict_entries() -> None:
+    """LLMs occasionally yield arrays of strings — filter them out."""
+    text = (
+        "Cleaned\n"
+        "---CHANGELOG---\n"
+        '["not a dict", {"layer": "L3"}, 42]\n'
+        "---SUGGESTIONS---\n"
+        "[]"
+    )
+    _edited, changelog, _ = Pipeline._split_output(text)
+    assert len(changelog) == 1
+    assert changelog[0]["layer"] == "L3"
+
+
+def test_dedupe_suggestions_merges_by_canonical() -> None:
+    from clearscript.core.pipeline import _dedupe_suggestions
+
+    items = [
+        {"kind": "term", "canonical": "Dify"},
+        {"kind": "term", "canonical": "Dify"},  # exact dup
+        {"kind": "term", "canonical": "DIFY"},  # case dup
+        {"kind": "term", "canonical": "Manus"},
+        {"kind": "speaker", "canonical_name": "Eileen"},
+    ]
+    out = _dedupe_suggestions(items)
+    assert len(out) == 3  # Dify (once) + Manus + Eileen
+
+
+def test_dedupe_suggestions_skips_items_with_no_identity() -> None:
+    from clearscript.core.pipeline import _dedupe_suggestions
+
+    items = [
+        {"kind": "term"},  # no canonical/title
+        {"kind": "term", "canonical": "Dify"},
+        {},
+    ]
+    out = _dedupe_suggestions(items)
+    assert len(out) == 1
+    assert out[0]["canonical"] == "Dify"
+
+
 def test_pipeline_split_output_handles_no_suggestions_section(mock_provider) -> None:
     text = "Edited text\n---CHANGELOG---\n[]"
     edited, changelog, suggestions = Pipeline._split_output(text)

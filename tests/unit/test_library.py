@@ -266,3 +266,83 @@ def test_list_terms_pagination(tmp_library) -> None:
         tmp_library.add_term(canonical=f"Term{i:02d}", aliases=[f"T{i:02d}"])
     rows = tmp_library.list_terms(limit=10)
     assert len(rows) == 10
+
+
+def test_update_term_replaces_aliases(tmp_library) -> None:
+    """update_term with aliases= replaces (not appends to) the alias set.
+
+    The UI relies on this: when the user edits a term's aliases in the
+    library panel and saves, they expect their list to win — not a union
+    with what was there before.
+    """
+    term_id = tmp_library.add_term(
+        canonical="Anthropic",
+        aliases=["iShopee", "Anthropy"],
+    )
+    tmp_library.update_term(term_id, aliases=["Anthropic AI"])
+    # Old aliases gone.
+    assert tmp_library.lookup_alias("iShopee") is None
+    assert tmp_library.lookup_alias("Anthropy") is None
+    # New alias present.
+    hit = tmp_library.lookup_alias("Anthropic AI")
+    assert hit is not None
+    assert hit.canonical == "Anthropic"
+
+
+def test_update_term_changes_domain(tmp_library) -> None:
+    term_id = tmp_library.add_term(canonical="Mem0", domain="ai-infra")
+    tmp_library.update_term(term_id, domain="ai-product")
+    hit = tmp_library.lookup_alias("Mem0")
+    assert hit is not None
+    assert hit.domain == "ai-product"
+
+
+def test_update_speaker_changes_label(tmp_library) -> None:
+    sid = tmp_library.add_speaker(
+        canonical_name="Eileen",
+        display_label="Eileen：",
+        aliases=["Speaker 2"],
+    )
+    tmp_library.update_speaker(sid, display_label="Eileen (founder)：")
+    hit = tmp_library.lookup_speaker("Speaker 2")
+    assert hit is not None
+    assert hit.display_label == "Eileen (founder)："
+
+
+def test_lookup_alias_is_case_sensitive_by_design(tmp_library) -> None:
+    """Aliases are stored verbatim. 'Tabby' and 'tabby' are not the same.
+
+    ASR tools preserve casing so the canonical mapping must also — getting
+    'tabby' back when the alias is 'Tabby' would let lowercase common words
+    accidentally trigger corrections.
+    """
+    tmp_library.add_term(canonical="Tavily", aliases=["Tabby"])
+    assert tmp_library.lookup_alias("Tabby") is not None
+    # Lowercase variant isn't in the alias table.
+    assert tmp_library.lookup_alias("tabby") is None
+
+
+def test_negative_rules_idempotent(tmp_library) -> None:
+    """Adding the same negative twice must not double-count."""
+    tmp_library.add_negative(
+        text="蛮好的",
+        do_not_change_to="很好",
+        reason="preserve colloquial style",
+    )
+    tmp_library.add_negative(
+        text="蛮好的",
+        do_not_change_to="很好",
+        reason="preserve colloquial style",
+    )
+    negatives = tmp_library.list_negatives()
+    # The library deduplicates by (text, do_not_change_to) — only one row.
+    matching = [n for n in negatives if n["text"] == "蛮好的"]
+    assert len(matching) == 1
+
+
+def test_session_finish_records_tokens(tmp_library) -> None:
+    sid = tmp_library.start_session(project_slug="t", provider="m", model="m1")
+    tmp_library.finish_session(sid, input_tokens=1234, output_tokens=567)
+    # The session row should be findable in stats.
+    stats = tmp_library.stats()
+    assert stats["sessions"] >= 1
