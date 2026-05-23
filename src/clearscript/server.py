@@ -560,8 +560,20 @@ def create_app() -> FastAPI:
         briefing_text = orig_project.read_briefing()
         title = orig_meta.get("title")
 
-        # Provider override: caller's request > original project's provider > config default.
-        provider_choice = req.provider or orig_meta.get("provider")
+        # Provider resolution priority:
+        #   1. Explicit override in the request body
+        #   2. The original project's provider (only if it's still in config)
+        #   3. The config's default provider
+        # The fallback in step 2 protects users who rename providers or
+        # remove the one they used — the rerun stays runnable.
+        configured = {p for p in cfg().providers}
+        if req.provider:
+            provider_choice = req.provider
+        elif orig_meta.get("provider") in configured:
+            provider_choice = orig_meta.get("provider")
+        else:
+            provider_choice = None  # let _resolve fall through to default
+
         model_choice = req.model or orig_meta.get("model")
         llm, chosen_model = _resolve_pipeline_pieces(provider_choice, model_choice)
 

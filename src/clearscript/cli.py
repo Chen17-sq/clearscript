@@ -363,10 +363,10 @@ def projects_rerun(
     rerun captures the improved output as a new sibling project so you
     can diff the two runs and see what changed.
     """
-    from clearscript.ingest import TxtAdapter
     from clearscript.ingest.json_ingest import JsonAdapter
     from clearscript.ingest.md import MdAdapter
     from clearscript.ingest.srt import SrtAdapter
+    from clearscript.ingest.txt import TxtAdapter
     from clearscript.ingest.vtt import VttAdapter
 
     cfg = load_config()

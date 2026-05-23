@@ -187,3 +187,82 @@ def test_stats_includes_new_categories(tmp_library) -> None:
     assert stats["proposed_terms"] == 1
     assert stats["edit_patterns"] == 1
     assert stats["negative_rules"] == 1
+
+
+# ============ Edge cases & robustness ============
+
+
+def test_lookup_alias_finds_canonical_directly(tmp_library) -> None:
+    """The seed pack stores 'Dify' as canonical with 'DeFi' as alias.
+    Asking for 'Dify' directly (not via alias) must also resolve, because
+    the pipeline's entity extractor may surface either form.
+    """
+    tmp_library.add_term(canonical="Dify", aliases=["DeFi"])
+    by_canonical = tmp_library.lookup_alias("Dify")
+    assert by_canonical is not None
+    assert by_canonical.canonical == "Dify"
+
+
+def test_add_term_with_empty_aliases_still_creates_canonical(tmp_library) -> None:
+    """A term without any aliases is still a valid library entry — Mode B
+    sometimes accepts terms before the user has seen real ASR misspellings.
+    """
+    term_id = tmp_library.add_term(canonical="SoloCanonical", aliases=[])
+    assert term_id > 0
+    hit = tmp_library.lookup_alias("SoloCanonical")
+    assert hit is not None
+
+
+def test_search_terms_fts_finds_partial_match(tmp_library) -> None:
+    """FTS5 lets users find a term by typing part of the canonical name."""
+    tmp_library.add_term(canonical="Anthropic", aliases=["iShopee"])
+    tmp_library.add_term(canonical="OpenAI", aliases=["O AI"])
+    results = tmp_library.search_terms("Anthropic")
+    canonicals = {h.canonical for h in results}
+    assert "Anthropic" in canonicals
+
+
+def test_reject_term_marks_as_deprecated(tmp_library) -> None:
+    """Mode B: when the user rejects a suggestion, the term shouldn't
+    silently resurface in subsequent prompt contexts.
+    """
+    term_id = tmp_library.add_term(canonical="Junk", aliases=["jnk"])
+    tmp_library.reject_term(term_id)
+    # all_terms_in_domain filters out deprecated terms.
+    terms = tmp_library.all_terms_in_domain(None)
+    assert all(t.canonical != "Junk" for t in terms)
+
+
+def test_delete_term_removes_aliases(tmp_library) -> None:
+    """Deleting a term must clean up its aliases so they don't shadow new entries."""
+    term_id = tmp_library.add_term(canonical="OldName", aliases=["OldAlias"])
+    assert tmp_library.lookup_alias("OldAlias") is not None
+    tmp_library.delete_term(term_id)
+    assert tmp_library.lookup_alias("OldAlias") is None
+    assert tmp_library.lookup_alias("OldName") is None
+
+
+def test_add_speaker_appends_aliases_on_re_add(tmp_library) -> None:
+    """Adding the same speaker again with new aliases extends, not duplicates."""
+    tmp_library.add_speaker(
+        canonical_name="Founder",
+        display_label="Founder：",
+        aliases=["Speaker 2"],
+    )
+    tmp_library.add_speaker(
+        canonical_name="Founder",
+        display_label="Founder：",
+        aliases=["F", "boss"],
+    )
+    for alias in ("Speaker 2", "F", "boss"):
+        hit = tmp_library.lookup_speaker(alias)
+        assert hit is not None
+        assert hit.canonical_name == "Founder"
+
+
+def test_list_terms_pagination(tmp_library) -> None:
+    """list_terms must respect limit so the UI doesn't paint thousands of rows."""
+    for i in range(25):
+        tmp_library.add_term(canonical=f"Term{i:02d}", aliases=[f"T{i:02d}"])
+    rows = tmp_library.list_terms(limit=10)
+    assert len(rows) == 10

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from clearscript.core.cost import estimate_cost, list_known_models
+from clearscript.core.cost import actual_cost, estimate_cost, list_known_models
 
 
 def test_anthropic_opus_estimate_is_in_expected_range() -> None:
@@ -73,6 +73,76 @@ def test_known_models_listing_shape() -> None:
     assert "claude-opus-4-7" in known["anthropic"]
     assert "openai-compat" in known
     assert "deepseek-chat" in known["openai-compat"]
+
+
+def test_actual_cost_with_known_pricing() -> None:
+    """actual_cost uses REAL token counts (not estimates from char length)."""
+    cost = actual_cost(
+        provider_type="openai-compat",
+        model="deepseek-v4-flash",
+        input_tokens=10_000,
+        output_tokens=5_000,
+    )
+    assert cost.pricing_known
+    assert cost.input_tokens == 10_000
+    # deepseek-v4-flash: $0.15/M input, $0.60/M output
+    expected_in = 10_000 / 1_000_000 * 0.15
+    expected_out = 5_000 / 1_000_000 * 0.60
+    assert abs(cost.input_cost_usd - expected_in) < 1e-6
+    assert abs(cost.output_cost_usd - expected_out) < 1e-6
+    assert abs(cost.total_cost_usd - (expected_in + expected_out)) < 1e-6
+
+
+def test_actual_cost_unknown_model_does_not_crash() -> None:
+    cost = actual_cost(
+        provider_type="openai",
+        model="future-model-2030",
+        input_tokens=1000,
+        output_tokens=500,
+    )
+    assert not cost.pricing_known
+    assert cost.total_cost_usd == 0.0
+    assert cost.input_tokens == 1000  # token counts preserved for display
+    assert cost.output_tokens_estimate == 500
+
+
+def test_actual_cost_ollama_always_free() -> None:
+    cost = actual_cost(
+        provider_type="ollama",
+        model="qwen2.5:14b",
+        input_tokens=999_999,
+        output_tokens=999_999,
+    )
+    assert cost.pricing_known
+    assert cost.total_cost_usd == 0.0
+
+
+def test_actual_cost_zero_tokens_returns_zero() -> None:
+    cost = actual_cost(
+        provider_type="anthropic",
+        model="claude-opus-4-7",
+        input_tokens=0,
+        output_tokens=0,
+    )
+    assert cost.total_cost_usd == 0.0
+    assert cost.input_tokens == 0
+
+
+def test_actual_cost_anthropic_opus_scales_linearly() -> None:
+    """Doubling tokens doubles cost."""
+    one = actual_cost(
+        provider_type="anthropic",
+        model="claude-opus-4-7",
+        input_tokens=1000,
+        output_tokens=1000,
+    )
+    two = actual_cost(
+        provider_type="anthropic",
+        model="claude-opus-4-7",
+        input_tokens=2000,
+        output_tokens=2000,
+    )
+    assert abs(two.total_cost_usd - 2 * one.total_cost_usd) < 1e-6
 
 
 def test_as_dict_round_trip() -> None:

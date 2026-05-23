@@ -120,11 +120,22 @@ class Library:
         )
 
     def reject_term(self, term_id: int) -> None:
+        """Mark a term as rejected — increments reject_count, lowers confidence,
+        and flips status to 'deprecated' so subsequent lookups + library-context
+        injection skip it.
+
+        Rejection is treated as an explicit user signal: one rejection is
+        enough to deprecate. ``all_terms_in_domain`` filters by
+        ``status != 'deprecated'`` so the rejected term stops showing up in
+        the system prompt. The row is preserved (not deleted) so the user
+        can un-reject via ``confirm_term`` if they change their mind.
+        """
         self._conn.execute(
             """
             UPDATE terms
             SET reject_count = reject_count + 1,
                 confidence = MAX(0.0, confidence - 0.2),
+                status = 'deprecated',
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
             """,
