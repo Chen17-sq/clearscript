@@ -16,7 +16,7 @@ import webbrowser
 from importlib import resources
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -230,6 +230,20 @@ class UpdateTranscriptRequest(BaseModel):
 class RerunRequest(BaseModel):
     provider: str | None = None
     model: str | None = None
+
+
+class NegativePayload(BaseModel):
+    """A negative-correction rule — 'do NOT change `text` to `do_not_change_to`'.
+
+    Used by L3 to suppress over-eager substitutions. Common examples:
+    keeping speaker colloquialisms ("蛮好的" not "很好"), preserving
+    approximate phrasing ("差不多三四百人"), etc.
+    """
+
+    text: str
+    do_not_change_to: str | None = None
+    domain: str | None = None
+    reason: str | None = None
 
 
 # ============ App factory ============
@@ -804,6 +818,75 @@ def create_app() -> FastAPI:
                 project.cleaned_docx_path.unlink()
         return {"ok": True, "slug": slug, "bytes": len(payload.cleaned_markdown)}
 
+    @app.get("/api/projects/{slug}/compare")
+    def project_compare(slug: str, with_: str = Query(..., alias="with")) -> dict:
+        """Return cleaned markdown for two projects + a unified diff.
+
+        Used by the UI to show "what changed between this rerun and its
+        parent" — and by users debugging library tweaks (run twice with
+        a tweak in between, diff the result).
+
+        Path slug is the *left* side (treated as 'old' in the diff),
+        ``with`` is the *right* side ('new'). For a rerun project, call
+        compare with slug=<original>&with=<rerun_slug> to see how the
+        library tweak affected the output.
+        """
+        import difflib
+
+        store = ProjectStore(cfg().projects_root)
+        if not store.exists(slug):
+            raise HTTPException(404, f"Project {slug!r} not found")
+        if not store.exists(with_):
+            raise HTTPException(404, f"Project {with_!r} not found")
+
+        left = store.open(slug).detail()
+        right = store.open(with_).detail()
+
+        left_md = left.get("cleaned_markdown") or ""
+        right_md = right.get("cleaned_markdown") or ""
+
+        diff_lines = list(
+            difflib.unified_diff(
+                left_md.splitlines(keepends=True),
+                right_md.splitlines(keepends=True),
+                fromfile=f"{slug}/transcript.md",
+                tofile=f"{with_}/transcript.md",
+                n=3,
+            )
+        )
+
+        # Quick numeric summary so the UI can show "+N -M" without
+        # re-parsing the diff client-side.
+        added = sum(
+            1 for line in diff_lines if line.startswith("+") and not line.startswith("+++")
+        )
+        removed = sum(
+            1 for line in diff_lines if line.startswith("-") and not line.startswith("---")
+        )
+
+        return {
+            "left": {
+                "slug": slug,
+                "title": left.get("title"),
+                "cleaned_markdown": left_md,
+                "model": left.get("model"),
+                "created_at": left.get("created_at"),
+            },
+            "right": {
+                "slug": with_,
+                "title": right.get("title"),
+                "cleaned_markdown": right_md,
+                "model": right.get("model"),
+                "created_at": right.get("created_at"),
+            },
+            "unified_diff": "".join(diff_lines),
+            "stats": {
+                "added": added,
+                "removed": removed,
+                "identical": left_md == right_md,
+            },
+        }
+
     @app.get("/api/projects/{slug}/transcript.md")
     def project_transcript_md(slug: str) -> Response:
         store = ProjectStore(cfg().projects_root)
@@ -960,6 +1043,31 @@ def create_app() -> FastAPI:
             },
         )
 
+    @app.get("/api/library/export.md")
+    def library_export_markdown() -> Response:
+        """Markdown view of the library — git-friendly, human-readable."""
+        lib = open_library()
+        try:
+            md = lib.export_markdown()
+        finally:
+            lib.close()
+        return Response(
+            content=md,
+            media_type="text/markdown; charset=utf-8",
+            headers={
+                "Content-Disposition": 'attachment; filename="clearscript-library.md"',
+            },
+        )
+
+    @app.get("/api/library/health")
+    def library_health(stale_days: int = 90) -> dict:
+        """Surface duplicates / low-confidence / stale terms for cleanup."""
+        lib = open_library()
+        try:
+            return lib.health_check(stale_days=stale_days)
+        finally:
+            lib.close()
+
     @app.post("/api/library/import")
     def library_import(payload: dict) -> dict:
         """Merge an exported library back in. Caller passes the parsed JSON.
@@ -1062,6 +1170,43 @@ def create_app() -> FastAPI:
             lib.close()
 
     # ============ Library: bulk accept Mode B suggestions ============
+
+    # ============ Library: negatives ============
+
+    @app.get("/api/library/negatives")
+    def list_negatives_endpoint() -> dict:
+        lib = open_library()
+        try:
+            return {"negatives": lib.list_negatives()}
+        finally:
+            lib.close()
+
+    @app.post("/api/library/negatives", status_code=201)
+    def add_negative_endpoint(payload: NegativePayload) -> dict:
+        if not payload.text.strip():
+            raise HTTPException(400, "text is required")
+        lib = open_library()
+        try:
+            lib.add_negative(
+                text=payload.text,
+                do_not_change_to=payload.do_not_change_to,
+                domain=payload.domain,
+                reason=payload.reason,
+            )
+            return {"ok": True}
+        finally:
+            lib.close()
+
+    @app.delete("/api/library/negatives/{negative_id}", status_code=204)
+    def delete_negative_endpoint(negative_id: int) -> Response:
+        lib = open_library()
+        try:
+            deleted = lib.delete_negative(negative_id)
+            if not deleted:
+                raise HTTPException(404, f"Negative rule {negative_id} not found")
+            return Response(status_code=204)
+        finally:
+            lib.close()
 
     @app.post("/api/library/accept-suggestions")
     def accept_suggestions(req: AcceptSuggestionsRequest) -> dict:

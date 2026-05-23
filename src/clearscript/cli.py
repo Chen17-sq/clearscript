@@ -464,6 +464,74 @@ def projects_rerun(
                   f"tokens: in={result.input_tokens} out={result.output_tokens}[/dim]")
 
 
+@lib_app.command("negatives")
+def lib_negatives(
+    add: str | None = typer.Option(
+        None, "--add", help="Add a new negative rule (the text NOT to change)"
+    ),
+    do_not_change_to: str | None = typer.Option(
+        None, "--not-to", help="With --add: the wrong target the model keeps choosing"
+    ),
+    domain: str | None = typer.Option(None, "--domain", help="Optional domain scope"),
+    reason: str | None = typer.Option(None, "--reason", help="Why this rule exists"),
+    delete: int | None = typer.Option(
+        None, "--delete", help="Delete a negative rule by id (use `lib negatives` to list)"
+    ),
+) -> None:
+    """List, add, or delete negative-correction rules.
+
+    Negatives tell L3 'do NOT change X' even when the model thinks it
+    should. Examples: keep speaker colloquialisms ("蛮好的" not "很好"),
+    preserve approximate phrasing ("差不多三四百人").
+
+    With no flags, lists existing negatives.
+    """
+    cfg = load_config()
+    ensure_dirs(cfg)
+    library = Library(cfg.library_path)
+    try:
+        if add:
+            library.add_negative(
+                text=add,
+                do_not_change_to=do_not_change_to,
+                domain=domain,
+                reason=reason,
+            )
+            console.print(f"[green]✓[/green] added negative rule: don't change {add!r}")
+            return
+        if delete is not None:
+            ok = library.delete_negative(delete)
+            if ok:
+                console.print(f"[green]✓[/green] deleted negative rule #{delete}")
+            else:
+                err_console.print(f"[red]No negative rule with id {delete}[/red]")
+                raise typer.Exit(1)
+            return
+
+        rows = library.list_negatives()
+    finally:
+        library.close()
+
+    if not rows:
+        console.print("[dim]No negative rules. Add one with `lib negatives --add ...`[/dim]")
+        return
+    table = Table(title="Negative-correction rules")
+    table.add_column("ID")
+    table.add_column("Text", style="bold")
+    table.add_column("Don't change to")
+    table.add_column("Domain")
+    table.add_column("Reason", overflow="fold")
+    for r in rows:
+        table.add_row(
+            str(r["id"]),
+            r["text"],
+            r.get("do_not_change_to") or "—",
+            r.get("domain") or "—",
+            r.get("reason") or "—",
+        )
+    console.print(table)
+
+
 @lib_app.command("lookup")
 def lib_lookup(
     alias: str = typer.Argument(..., help="ASR variant or canonical to look up"),
@@ -523,18 +591,27 @@ def lib_search(
 @lib_app.command("export")
 def lib_export(
     out_path: Path = typer.Argument(
-        ..., help="Where to write the library JSON (e.g. ./my-library.json)"
+        ..., help="Where to write the library export (e.g. ./my-library.json)"
+    ),
+    as_markdown: bool = typer.Option(
+        False, "--md", help="Write a human-readable markdown view instead of JSON"
     ),
 ) -> None:
-    """Export the entire library as a JSON file for backup or sharing.
+    """Export the entire library for backup or sharing.
 
-    The file is human-readable, version-tagged, and can be re-imported
-    via ``lib import`` on the same machine or any other clearscript install.
+    By default writes the versioned JSON that ``lib import`` can re-ingest.
+    Pass ``--md`` for a git-friendly markdown view (read-only — not
+    importable, just for reading and diffing in a repo).
     """
     cfg = load_config()
     ensure_dirs(cfg)
     library = Library(cfg.library_path)
     try:
+        if as_markdown:
+            content = library.export_markdown()
+            out_path.write_text(content, encoding="utf-8")
+            console.print(f"[green]✓[/green] wrote library markdown → {out_path}")
+            return
         payload = library.export_dict()
     finally:
         library.close()
@@ -547,6 +624,70 @@ def lib_export(
         f"[dim]terms: {len(payload['terms'])} · speakers: {len(payload['speakers'])} · "
         f"patterns: {len(payload['edit_patterns'])} · negatives: {len(payload['negatives'])}[/dim]"
     )
+
+
+@lib_app.command("health")
+def lib_health(
+    stale_days: int = typer.Option(
+        90, "--stale-days", help="Days since last use to count a term as stale"
+    ),
+) -> None:
+    """Report library health — duplicates, low-confidence, stale terms.
+
+    Run this periodically (or after a busy Mode B harvest) to keep the
+    library tidy. Use the IDs in the output with ``lib delete-term`` or
+    the web UI's library tab.
+    """
+    cfg = load_config()
+    ensure_dirs(cfg)
+    library = Library(cfg.library_path)
+    try:
+        report = library.health_check(stale_days=stale_days)
+    finally:
+        library.close()
+
+    summary = report["summary"]
+    console.print(
+        f"[bold]Library health[/bold] (stale threshold: {report['stale_days_threshold']} days)\n"
+    )
+    console.print(f"  Duplicate aliases:     {summary['duplicate_alias_groups']}")
+    console.print(f"  Duplicate canonicals:  {summary['duplicate_canonical_groups']}")
+    console.print(f"  Low-confidence terms:  {summary['low_confidence_count']}")
+    console.print(f"  Stale terms:           {summary['stale_count']}")
+    console.print(f"  Orphan aliases:        {summary['orphan_alias_count']}")
+    console.print()
+
+    if report["duplicate_aliases"]:
+        t = Table(title="Duplicate aliases (one alias → multiple canonicals)")
+        t.add_column("Alias", style="bold")
+        t.add_column("Maps to")
+        t.add_column("Count", justify="right")
+        for d in report["duplicate_aliases"][:20]:
+            t.add_row(d["alias"], d["canonicals"], str(d["n"]))
+        console.print(t)
+
+    if report["duplicate_canonicals"]:
+        t = Table(title="Duplicate canonicals")
+        t.add_column("Canonical", style="bold")
+        t.add_column("Times added", justify="right")
+        for d in report["duplicate_canonicals"][:20]:
+            t.add_row(d["canonical"], str(d["n"]))
+        console.print(t)
+
+    if report["low_confidence_terms"]:
+        t = Table(title="Low-confidence terms (< 0.3)")
+        t.add_column("ID")
+        t.add_column("Canonical", style="bold")
+        t.add_column("Type")
+        t.add_column("Confidence", justify="right")
+        for d in report["low_confidence_terms"][:20]:
+            t.add_row(
+                str(d["id"]),
+                d["canonical"],
+                d.get("type") or "—",
+                f"{d['confidence']:.2f}",
+            )
+        console.print(t)
 
 
 @lib_app.command("import")

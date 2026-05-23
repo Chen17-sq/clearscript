@@ -587,6 +587,13 @@ class Library:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def delete_negative(self, negative_id: int) -> bool:
+        """Delete a negative-correction rule. Returns True if a row was removed."""
+        cursor = self._conn.execute(
+            "DELETE FROM negative_corrections WHERE id = ?", (negative_id,)
+        )
+        return cursor.rowcount > 0
+
     def stats(self) -> dict[str, int]:
         terms = self._conn.execute("SELECT COUNT(*) FROM terms").fetchone()[0]
         verified = self._conn.execute(
@@ -790,6 +797,186 @@ class Library:
             result["negatives_added"] += 1
 
         return result
+
+    def health_check(self, *, stale_days: int = 90) -> dict:
+        """Return a health snapshot of the library.
+
+        Highlights things the user probably wants to clean up:
+
+        - **duplicate_aliases**: same alias text mapping to multiple
+          canonicals — the lookup result is non-deterministic, so this is
+          a real correctness risk for the pipeline.
+        - **duplicate_canonicals**: the same canonical name added more
+          than once (e.g. via two suggestion accepts before refresh).
+        - **low_confidence_terms**: confidence < 0.3, still active —
+          probably noise from a single accidental Mode B accept.
+        - **stale_terms**: not used in ``stale_days`` days — candidates
+          for archival if the user is doing library cleanup.
+        - **orphan_aliases**: alias rows whose term_id no longer exists.
+          Shouldn't happen with FK CASCADE but worth surfacing if it does.
+        """
+        duplicate_aliases = [
+            dict(row)
+            for row in self._conn.execute(
+                """
+                SELECT alias, GROUP_CONCAT(t.canonical, ' | ') AS canonicals,
+                       COUNT(*) AS n
+                FROM term_aliases a
+                JOIN terms t ON t.id = a.term_id
+                WHERE t.status != 'deprecated'
+                GROUP BY alias
+                HAVING n > 1
+                ORDER BY n DESC, alias
+                """
+            ).fetchall()
+        ]
+
+        duplicate_canonicals = [
+            dict(row)
+            for row in self._conn.execute(
+                """
+                SELECT canonical, COUNT(*) AS n
+                FROM terms
+                WHERE status != 'deprecated'
+                GROUP BY canonical
+                HAVING n > 1
+                ORDER BY n DESC, canonical
+                """
+            ).fetchall()
+        ]
+
+        low_confidence_terms = [
+            dict(row)
+            for row in self._conn.execute(
+                """
+                SELECT id, canonical, type, domain, confidence
+                FROM terms
+                WHERE status != 'deprecated' AND confidence < 0.3
+                ORDER BY confidence ASC, canonical
+                LIMIT 200
+                """
+            ).fetchall()
+        ]
+
+        stale_terms = [
+            dict(row)
+            for row in self._conn.execute(
+                """
+                SELECT id, canonical, type, domain, last_used_at, times_used
+                FROM terms
+                WHERE status != 'deprecated'
+                  AND (
+                    last_used_at IS NULL
+                    OR last_used_at < datetime('now', ?)
+                  )
+                ORDER BY (last_used_at IS NULL) DESC, last_used_at ASC, canonical
+                LIMIT 200
+                """,
+                (f"-{int(stale_days)} days",),
+            ).fetchall()
+        ]
+
+        orphan_aliases = self._conn.execute(
+            """
+            SELECT COUNT(*) AS n
+            FROM term_aliases a
+            LEFT JOIN terms t ON t.id = a.term_id
+            WHERE t.id IS NULL
+            """
+        ).fetchone()["n"]
+
+        return {
+            "stale_days_threshold": int(stale_days),
+            "duplicate_aliases": duplicate_aliases,
+            "duplicate_canonicals": duplicate_canonicals,
+            "low_confidence_terms": low_confidence_terms,
+            "stale_terms": stale_terms,
+            "orphan_aliases": orphan_aliases,
+            "summary": {
+                "duplicate_alias_groups": len(duplicate_aliases),
+                "duplicate_canonical_groups": len(duplicate_canonicals),
+                "low_confidence_count": len(low_confidence_terms),
+                "stale_count": len(stale_terms),
+                "orphan_alias_count": orphan_aliases,
+            },
+        }
+
+    def export_markdown(self) -> str:
+        """Render the library as a human-readable markdown document.
+
+        Used by ``GET /api/library/export.md`` and ``lib export --md``.
+        Git-friendly: stable section ordering and one entry per line so
+        diffs show only what actually changed.
+        """
+        payload = self.export_dict()
+        lines: list[str] = ["# clearscript library", ""]
+        lines.append(
+            f"_Exported from clearscript (schema v{payload['schema_version']}). "
+            "Edit by hand at your own risk — re-import via "
+            "`clearscript lib import`._"
+        )
+        lines.append("")
+
+        terms_by_domain: dict[str, list[dict]] = {}
+        for t in payload["terms"]:
+            domain = t.get("domain") or "_"
+            terms_by_domain.setdefault(domain, []).append(t)
+
+        lines.append("## Terms")
+        lines.append("")
+        for domain in sorted(terms_by_domain.keys()):
+            lines.append(f"### Domain: `{domain}`")
+            lines.append("")
+            for t in sorted(terms_by_domain[domain], key=lambda x: x["canonical"].lower()):
+                aliases = ", ".join(f"`{a}`" for a in t.get("aliases", []))
+                type_part = f" ({t['type']})" if t.get("type") else ""
+                line = f"- **{t['canonical']}**{type_part}"
+                if aliases:
+                    line += f" ← {aliases}"
+                lines.append(line)
+            lines.append("")
+
+        if payload["speakers"]:
+            lines.append("## Speakers")
+            lines.append("")
+            for s in sorted(
+                payload["speakers"], key=lambda x: x["canonical_name"].lower()
+            ):
+                aliases = ", ".join(f"`{a}`" for a in s.get("aliases", []))
+                lang = f" [{s['primary_language']}]" if s.get("primary_language") else ""
+                line = f"- **{s['canonical_name']}** → `{s['display_label']}`{lang}"
+                if aliases:
+                    line += f" ← {aliases}"
+                lines.append(line)
+            lines.append("")
+
+        if payload["edit_patterns"]:
+            lines.append("## Edit patterns")
+            lines.append("")
+            for p in payload["edit_patterns"]:
+                lines.append(f"- **{p['title']}**")
+                lines.append(f"  - Trigger: {p['trigger_desc']}")
+                lines.append(f"  - Action: {p['action']}")
+                if p.get("rationale"):
+                    lines.append(f"  - Rationale: {p['rationale']}")
+            lines.append("")
+
+        if payload["negatives"]:
+            lines.append("## Negative rules (do-not-change)")
+            lines.append("")
+            for n in payload["negatives"]:
+                target = (
+                    f" (don't change to `{n['do_not_change_to']}`)"
+                    if n.get("do_not_change_to")
+                    else ""
+                )
+                line = f"- `{n['text']}`{target}"
+                if n.get("reason"):
+                    line += f" — {n['reason']}"
+                lines.append(line)
+            lines.append("")
+
+        return "\n".join(lines)
 
     def bulk_delete_terms(self, term_ids: list[int]) -> int:
         """Delete multiple terms by id; returns the number actually deleted.

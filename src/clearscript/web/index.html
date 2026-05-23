@@ -475,6 +475,7 @@
           <h3 id="project-detail-title" class="font-black uppercase tracking-widest text-sm">Select a run</h3>
           <div class="ml-auto flex items-center gap-2">
             <button id="proj-rerun" class="bauhaus-press border-2 border-ink bg-white text-ink px-3 py-1 text-[11px] font-bold uppercase tracking-widest shadow-bauhaus-sm hover:bg-yellow disabled:opacity-40" disabled title="Re-run this transcript against your current library">↻ Re-run</button>
+            <button id="proj-compare" class="bauhaus-press border-2 border-ink bg-white text-ink px-3 py-1 text-[11px] font-bold uppercase tracking-widest shadow-bauhaus-sm hover:bg-yellow hidden" title="Diff this rerun against the original project">⇄ Compare</button>
             <button id="proj-download-md" class="bauhaus-press border-2 border-ink bg-white text-ink px-3 py-1 text-[11px] font-bold uppercase tracking-widest shadow-bauhaus-sm hover:bg-yellow disabled:opacity-40" disabled>↓ .md</button>
             <button id="proj-download-docx" class="bauhaus-press border-2 border-ink bg-yellow text-ink px-3 py-1 text-[11px] font-bold uppercase tracking-widest shadow-bauhaus-sm hover:opacity-90 disabled:opacity-40" disabled>↓ .docx</button>
             <button id="proj-download-input" class="bauhaus-press border-2 border-ink bg-white text-ink px-3 py-1 text-[11px] font-bold uppercase tracking-widest shadow-bauhaus-sm hover:bg-yellow disabled:opacity-40" disabled>↓ raw</button>
@@ -1525,7 +1526,82 @@
       $('pd-briefing').textContent = d.briefing || '(no briefing supplied)';
 
       ['proj-download-md', 'proj-download-docx', 'proj-download-input', 'proj-delete', 'proj-rerun'].forEach((id) => $(id).disabled = false);
+
+      // Compare button is only meaningful when this is a rerun project —
+      // show it iff rerun_of points at a still-existing original.
+      const cmpBtn = $('proj-compare');
+      if (d.rerun_of) {
+        cmpBtn.classList.remove('hidden');
+        cmpBtn.dataset.original = d.rerun_of;
+      } else {
+        cmpBtn.classList.add('hidden');
+        delete cmpBtn.dataset.original;
+      }
+
       setPdTab('cleaned');
+    }
+
+    async function compareWithOriginal() {
+      // Fetches the diff for the currently-selected rerun project against
+      // its original, then dumps the unified diff into a simple modal so
+      // the user can read it. Not pretty — functional first; v0.0.14 can
+      // colorize the diff inline.
+      const btn = $('proj-compare');
+      const origSlug = btn.dataset.original;
+      const reranSlug = state.selectedProjectSlug;
+      if (!origSlug || !reranSlug) return;
+
+      btn.disabled = true;
+      btn.textContent = '⇄ Loading…';
+      try {
+        const res = await fetch(
+          `/api/projects/${encodeURIComponent(origSlug)}/compare?with=${encodeURIComponent(reranSlug)}`,
+        );
+        if (!res.ok) {
+          alert(`Compare failed: ${res.status} ${await res.text()}`);
+          return;
+        }
+        const data = await res.json();
+        showDiffModal(data);
+      } catch (e) {
+        alert('Compare network error: ' + e.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '⇄ Compare';
+      }
+    }
+
+    function showDiffModal(data) {
+      const existing = document.getElementById('cs-diff-modal');
+      if (existing) existing.remove();
+      const stats = data.stats || {};
+      const identical = stats.identical
+        ? '<span class="text-ink/60">No differences — output is byte-identical.</span>'
+        : `<span class="text-green-700 font-bold">+${stats.added || 0}</span> · <span class="text-red-700 font-bold">-${stats.removed || 0}</span>`;
+      const diff = (data.unified_diff || '(no diff)').split('\n').map((line) => {
+        if (line.startsWith('+++') || line.startsWith('---')) return `<span class="text-ink/50">${escapeHtml(line)}</span>`;
+        if (line.startsWith('+')) return `<span class="bg-green-100 text-green-900">${escapeHtml(line)}</span>`;
+        if (line.startsWith('-')) return `<span class="bg-red-100 text-red-900">${escapeHtml(line)}</span>`;
+        if (line.startsWith('@@')) return `<span class="text-blue font-bold">${escapeHtml(line)}</span>`;
+        return escapeHtml(line);
+      }).join('\n');
+      const modal = document.createElement('div');
+      modal.id = 'cs-diff-modal';
+      modal.className = 'fixed inset-0 z-50 bg-ink/60 flex items-center justify-center p-6';
+      modal.innerHTML = `
+        <div class="bg-white border-4 border-ink shadow-bauhaus-lg max-w-5xl w-full max-h-[85vh] flex flex-col">
+          <header class="border-b-4 border-ink bg-blue text-white px-5 py-3 flex items-center gap-3">
+            <h3 class="font-black uppercase tracking-widest text-sm">Compare</h3>
+            <span class="text-[11px] font-mono opacity-80">${escapeHtml(data.left.slug)} → ${escapeHtml(data.right.slug)}</span>
+            <span class="ml-auto text-xs font-mono">${identical}</span>
+            <button id="cs-diff-close" class="border-2 border-bg bg-white text-ink px-2 py-1 text-[11px] font-bold uppercase">Close</button>
+          </header>
+          <pre class="flex-1 overflow-auto p-4 font-mono text-xs whitespace-pre-wrap">${diff}</pre>
+        </div>
+      `;
+      document.body.appendChild(modal);
+      document.getElementById('cs-diff-close').addEventListener('click', () => modal.remove());
+      modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
     }
 
     let pdSaveTimer = null;
@@ -1760,6 +1836,7 @@
       });
       $('proj-delete').addEventListener('click', deleteProject);
       $('proj-rerun').addEventListener('click', rerunProject);
+      $('proj-compare').addEventListener('click', compareWithOriginal);
 
       // Initial tab from hash
       const initial = window.location.hash.replace('#', '') || 'editor';

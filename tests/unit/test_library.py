@@ -504,3 +504,128 @@ def test_bulk_delete_terms_returns_count(tmp_library) -> None:
 
 def test_bulk_delete_terms_empty_list_is_safe(tmp_library) -> None:
     assert tmp_library.bulk_delete_terms([]) == 0
+
+
+# ============ Health check ============
+
+
+def test_health_check_detects_duplicate_alias_across_terms(tmp_library) -> None:
+    """Same alias mapping to two canonicals is a real correctness risk —
+    pipeline lookup becomes non-deterministic. Health check must surface it.
+    """
+    tmp_library.add_term(canonical="Foo", aliases=["common"])
+    tmp_library.add_term(canonical="Bar", aliases=["common"])
+    report = tmp_library.health_check()
+    aliases = [d["alias"] for d in report["duplicate_aliases"]]
+    assert "common" in aliases
+    assert report["summary"]["duplicate_alias_groups"] >= 1
+
+
+def test_health_check_detects_low_confidence_terms(tmp_library) -> None:
+    """Terms whose confidence dropped below 0.3 (after rejection or never
+    promoted from 'proposed') are surfaced for review.
+
+    add_term inserts at confidence 0.5 with status='proposed', then we
+    manually push it below threshold so the report flags it.
+    """
+    term_id = tmp_library.add_term(canonical="Sketchy", aliases=["maybe"])
+    # Reject deprecates AND lowers confidence; we want a still-active,
+    # low-confidence term, so update confidence directly.
+    tmp_library._conn.execute(
+        "UPDATE terms SET confidence = 0.1 WHERE id = ?", (term_id,)
+    )
+    report = tmp_library.health_check()
+    canonicals = [t["canonical"] for t in report["low_confidence_terms"]]
+    assert "Sketchy" in canonicals
+
+
+def test_health_check_skips_deprecated_terms(tmp_library) -> None:
+    """A rejected (deprecated) term must not show up in any health bucket.
+
+    The user already told us they don't care about it — surfacing it as
+    "low confidence" or "stale" would be noise.
+    """
+    term_id = tmp_library.add_term(canonical="Rejected", aliases=["rj"])
+    tmp_library.reject_term(term_id)  # sets status=deprecated, drops confidence
+    report = tmp_library.health_check()
+    low = [t["canonical"] for t in report["low_confidence_terms"]]
+    assert "Rejected" not in low
+
+
+def test_health_check_reports_zero_when_clean(tmp_library) -> None:
+    """Empty library produces all zeros — sanity check on the report shape."""
+    report = tmp_library.health_check()
+    s = report["summary"]
+    assert s["duplicate_alias_groups"] == 0
+    assert s["duplicate_canonical_groups"] == 0
+    assert s["low_confidence_count"] == 0
+    assert s["orphan_alias_count"] == 0
+
+
+def test_health_check_stale_threshold_is_configurable(tmp_library) -> None:
+    """stale_days parameter passed through to the report."""
+    report = tmp_library.health_check(stale_days=30)
+    assert report["stale_days_threshold"] == 30
+
+
+def test_delete_negative_removes_row(tmp_library) -> None:
+    tmp_library.add_negative(text="foo", do_not_change_to="bar")
+    rows = tmp_library.list_negatives()
+    assert len(rows) == 1
+    target_id = rows[0]["id"]
+
+    deleted = tmp_library.delete_negative(target_id)
+    assert deleted is True
+    assert tmp_library.list_negatives() == []
+
+
+def test_delete_negative_missing_id_returns_false(tmp_library) -> None:
+    assert tmp_library.delete_negative(99999) is False
+
+
+# ============ Markdown export ============
+
+
+def test_export_markdown_includes_terms_and_aliases(tmp_library) -> None:
+    tmp_library.add_term(
+        canonical="Tavily", aliases=["Tabby"], type_="company", domain="ai-infra"
+    )
+    md = tmp_library.export_markdown()
+    assert "# clearscript library" in md
+    assert "Tavily" in md
+    assert "Tabby" in md
+    # Domain heading appears.
+    assert "ai-infra" in md
+
+
+def test_export_markdown_groups_terms_by_domain(tmp_library) -> None:
+    tmp_library.add_term(canonical="DomA_Term", domain="domA")
+    tmp_library.add_term(canonical="DomB_Term", domain="domB")
+    md = tmp_library.export_markdown()
+    # Both domain headings exist.
+    assert "domA" in md
+    assert "domB" in md
+    # DomA_Term comes before DomB_Term (alphabetic domain sort).
+    assert md.index("DomA_Term") < md.index("DomB_Term")
+
+
+def test_export_markdown_with_empty_library_has_just_headers(tmp_library) -> None:
+    """Should not crash on empty library."""
+    md = tmp_library.export_markdown()
+    assert "# clearscript library" in md
+    assert "## Terms" in md
+
+
+def test_export_markdown_includes_speakers_and_patterns(tmp_library) -> None:
+    tmp_library.add_speaker(canonical_name="Eileen", display_label="Eileen：")
+    tmp_library.add_edit_pattern(
+        title="Strip filler", trigger_desc="嗯", action="drop"
+    )
+    tmp_library.add_negative(text="蛮好的", do_not_change_to="很好")
+    md = tmp_library.export_markdown()
+    assert "## Speakers" in md
+    assert "Eileen" in md
+    assert "## Edit patterns" in md
+    assert "Strip filler" in md
+    assert "## Negative rules" in md
+    assert "蛮好的" in md

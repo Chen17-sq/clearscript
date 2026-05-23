@@ -217,6 +217,92 @@ def test_lib_import_rejects_non_json(cli_env, tmp_path) -> None:
     assert result.exit_code == 2
 
 
+def test_lib_negatives_add_and_list(cli_env) -> None:
+    """`lib negatives --add ...` then `lib negatives` (no args, list)."""
+    result = runner.invoke(
+        app,
+        [
+            "lib",
+            "negatives",
+            "--add",
+            "其实就是",
+            "--not-to",
+            "就是",
+            "--reason",
+            "filler preservation",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "added" in result.stdout.lower()
+
+    listing = runner.invoke(app, ["lib", "negatives"])
+    assert listing.exit_code == 0
+    assert "其实就是" in listing.stdout
+
+
+def test_lib_negatives_delete_by_id(cli_env) -> None:
+    from clearscript.config import load_config
+    from clearscript.library import Library
+
+    cfg = load_config()
+    lib = Library(cfg.library_path)
+    lib.add_negative(text="DeleteMe")
+    target_id = lib.list_negatives()[0]["id"]
+    lib.close()
+
+    result = runner.invoke(app, ["lib", "negatives", "--delete", str(target_id)])
+    assert result.exit_code == 0
+    assert "deleted" in result.stdout.lower()
+
+
+def test_lib_negatives_delete_missing_id_fails(cli_env) -> None:
+    result = runner.invoke(app, ["lib", "negatives", "--delete", "99999"])
+    assert result.exit_code == 1
+
+
+def test_lib_health_command(cli_env) -> None:
+    """`clearscript lib health` prints a summary even on an empty library."""
+    result = runner.invoke(app, ["lib", "health"])
+    assert result.exit_code == 0
+    assert "Library health" in result.stdout
+
+
+def test_lib_health_surfaces_duplicate_alias(cli_env) -> None:
+    from clearscript.config import load_config
+    from clearscript.library import Library
+
+    cfg = load_config()
+    lib = Library(cfg.library_path)
+    lib.add_term(canonical="Foo", aliases=["shared"])
+    lib.add_term(canonical="Bar", aliases=["shared"])
+    lib.close()
+
+    result = runner.invoke(app, ["lib", "health"])
+    assert result.exit_code == 0
+    # Either the alias name itself shows up in the "Duplicate aliases" table,
+    # or the summary line shows a non-zero count.
+    assert "Duplicate aliases" in result.stdout
+    assert "shared" in result.stdout
+
+
+def test_lib_export_markdown_flag(cli_env, tmp_path) -> None:
+    """`clearscript lib export --md` writes a markdown view."""
+    from clearscript.config import load_config
+    from clearscript.library import Library
+
+    cfg = load_config()
+    lib = Library(cfg.library_path)
+    lib.add_term(canonical="MarkdownTerm", aliases=["mt"])
+    lib.close()
+
+    out = tmp_path / "lib.md"
+    result = runner.invoke(app, ["lib", "export", str(out), "--md"])
+    assert result.exit_code == 0, result.stdout
+    md = out.read_text(encoding="utf-8")
+    assert "# clearscript library" in md
+    assert "MarkdownTerm" in md
+
+
 def test_lib_lookup_command(cli_env) -> None:
     """`clearscript lib lookup <alias>` finds seeded terms."""
     # Force-install seed pack first by opening server which auto-seeds.

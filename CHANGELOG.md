@@ -7,6 +7,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.13] - 2026-05-23
+
+### The library-hygiene + reproducibility release.
+
+v0.0.12 made the library portable. v0.0.13 makes it *legible*: you can
+see what's in there, spot the cruft, and prove your reruns produced
+something different.
+
+### Added — Library health check
+
+- ``Library.health_check(stale_days=N)`` returns five buckets:
+  ``duplicate_aliases`` (same alias mapping to multiple canonicals — a
+  real correctness bug for the pipeline), ``duplicate_canonicals``,
+  ``low_confidence_terms`` (< 0.3), ``stale_terms`` (not used in N
+  days), ``orphan_aliases``.
+- ``GET /api/library/health?stale_days=N`` surfaces the report.
+- ``clearscript lib health`` prints Rich tables with the top 20 of
+  each bucket so you can clean up from the CLI.
+
+### Added — Project compare (rerun diff)
+
+- ``GET /api/projects/{left}/compare?with={right}`` returns both
+  projects' cleaned markdown + a unified diff + ``{added, removed,
+  identical}`` stats.
+- **Web UI**: a ``⇄ Compare`` button appears on rerun project cards.
+  Clicking opens a modal with the colorized diff (+ green, - red, @@
+  hunk markers in blue) so you can read what your library tweak
+  actually changed.
+
+### Added — Negatives CRUD
+
+Negative-correction rules ("don't change 蛮好的 to 很好") were only
+reachable via the accept-suggestions endpoint. Now:
+
+- ``GET /api/library/negatives`` lists them.
+- ``POST /api/library/negatives`` adds one.
+- ``DELETE /api/library/negatives/{id}`` removes it.
+- ``clearscript lib negatives`` lists them; ``--add TEXT --not-to X``
+  to add; ``--delete ID`` to remove.
+
+### Added — Markdown library export
+
+- ``Library.export_markdown()`` renders the library as a human-readable,
+  git-friendly markdown document (terms grouped by domain, alphabetic
+  within each domain, one entry per line).
+- ``GET /api/library/export.md`` serves the markdown view.
+- ``clearscript lib export <path> --md`` writes it locally.
+
+The markdown view is **read-only** — for round-trip backup, use the
+JSON export (``lib export <path>``). Markdown is for reading + diffing
+in a git repo.
+
+### Tests
+
+217 → **243** (+26). All passing. Ruff clean.
+
+- ``test_library.py``: +12 (health check buckets, deprecated exclusion,
+  markdown export grouping/sorting, delete_negative).
+- ``test_server.py``: +9 (health endpoint, compare endpoint with
+  identical/different/404 cases, markdown export, negatives CRUD,
+  validation).
+- ``test_cli.py``: +5 (lib health, lib negatives add/list/delete,
+  lib export --md).
+
 ## [0.0.12] - 2026-05-23
 
 ### The library-as-portable-artifact release.

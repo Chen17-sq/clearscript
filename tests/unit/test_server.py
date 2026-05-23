@@ -693,6 +693,163 @@ def test_library_bulk_delete_rejects_non_int_ids(app_client) -> None:
     assert res.status_code == 400
 
 
+def test_library_negatives_crud(app_client) -> None:
+    """List → add → list (sees new) → delete → list (gone)."""
+    client, _ = app_client
+
+    # Initial state — seed pack ships 3 negatives.
+    initial = client.get("/api/library/negatives").json()["negatives"]
+    initial_count = len(initial)
+
+    # Add a new one.
+    res = client.post(
+        "/api/library/negatives",
+        json={
+            "text": "其实就是",
+            "do_not_change_to": "就是",
+            "domain": "vc",
+            "reason": "preserve speaker's filler",
+        },
+    )
+    assert res.status_code == 201
+
+    listing = client.get("/api/library/negatives").json()["negatives"]
+    assert len(listing) == initial_count + 1
+    new_rule = next(n for n in listing if n["text"] == "其实就是")
+    assert new_rule["do_not_change_to"] == "就是"
+    assert new_rule["domain"] == "vc"
+
+    # Delete it.
+    res = client.delete(f"/api/library/negatives/{new_rule['id']}")
+    assert res.status_code == 204
+    final = client.get("/api/library/negatives").json()["negatives"]
+    assert len(final) == initial_count
+
+
+def test_library_negative_add_rejects_empty_text(app_client) -> None:
+    client, _ = app_client
+    res = client.post(
+        "/api/library/negatives",
+        json={"text": "   "},  # whitespace only
+    )
+    assert res.status_code == 400
+
+
+def test_library_negative_delete_404_for_missing_id(app_client) -> None:
+    client, _ = app_client
+    res = client.delete("/api/library/negatives/99999")
+    assert res.status_code == 404
+
+
+def test_project_compare_returns_diff(app_client) -> None:
+    """GET /api/projects/{left}/compare?with=<right> returns both sides + diff."""
+    client, stub = app_client
+
+    # Make one project.
+    slug_a = client.post(
+        "/api/run", json={"transcript": "Speaker 1: First content.\n"}
+    ).json()["project_slug"]
+
+    # Change the stub's output so the second project's cleaned_md differs.
+    stub.response_text = (
+        "Speaker B: DIFFERENT cleaned text.\n"
+        "---CHANGELOG---\n[]\n"
+        "---SUGGESTIONS---\n[]"
+    )
+    slug_b = client.post(
+        "/api/run", json={"transcript": "Speaker 1: Second content.\n"}
+    ).json()["project_slug"]
+
+    res = client.get(f"/api/projects/{slug_a}/compare?with={slug_b}")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["left"]["slug"] == slug_a
+    assert body["right"]["slug"] == slug_b
+    assert body["left"]["cleaned_markdown"]
+    assert body["right"]["cleaned_markdown"]
+    assert "unified_diff" in body
+    assert "+" in body["unified_diff"] or "-" in body["unified_diff"]
+    assert body["stats"]["identical"] is False
+    assert body["stats"]["added"] + body["stats"]["removed"] > 0
+
+
+def test_project_compare_identical_when_same_output(app_client) -> None:
+    client, _ = app_client
+    slug_a = client.post(
+        "/api/run", json={"transcript": "Speaker 1: Same.\n"}
+    ).json()["project_slug"]
+    slug_b = client.post(
+        "/api/run", json={"transcript": "Speaker 2: Same.\n"}
+    ).json()["project_slug"]
+    res = client.get(f"/api/projects/{slug_a}/compare?with={slug_b}")
+    assert res.status_code == 200
+    # Same stub response means cleaned_markdown is identical.
+    assert res.json()["stats"]["identical"] is True
+
+
+def test_project_compare_404_if_either_missing(app_client) -> None:
+    client, _ = app_client
+    slug = client.post(
+        "/api/run", json={"transcript": "Speaker 1: hi.\n"}
+    ).json()["project_slug"]
+
+    res = client.get(f"/api/projects/{slug}/compare?with=no-such-slug")
+    assert res.status_code == 404
+
+    res = client.get(f"/api/projects/no-such-slug/compare?with={slug}")
+    assert res.status_code == 404
+
+
+def test_library_health_endpoint_returns_summary(app_client) -> None:
+    """GET /api/library/health returns the shape expected by the UI."""
+    client, _ = app_client
+    # Force a duplicate alias so the report has content to verify.
+    client.post(
+        "/api/library/terms",
+        json={"canonical": "Foo", "aliases": ["x"]},
+    )
+    client.post(
+        "/api/library/terms",
+        json={"canonical": "Bar", "aliases": ["x"]},  # same alias 'x'
+    )
+    res = client.get("/api/library/health")
+    assert res.status_code == 200
+    body = res.json()
+    for key in (
+        "duplicate_aliases",
+        "low_confidence_terms",
+        "stale_terms",
+        "summary",
+    ):
+        assert key in body, f"missing key {key}"
+    # The duplicate we created shows up.
+    aliases_listed = [d["alias"] for d in body["duplicate_aliases"]]
+    assert "x" in aliases_listed
+
+
+def test_library_health_respects_stale_days_query(app_client) -> None:
+    client, _ = app_client
+    res = client.get("/api/library/health?stale_days=7")
+    assert res.status_code == 200
+    assert res.json()["stale_days_threshold"] == 7
+
+
+def test_library_export_md_endpoint_returns_markdown(app_client) -> None:
+    """GET /api/library/export.md serves a markdown download."""
+    client, _ = app_client
+    client.post(
+        "/api/library/terms",
+        json={"canonical": "MarkdownMe", "aliases": ["mm"], "type": "company"},
+    )
+    res = client.get("/api/library/export.md")
+    assert res.status_code == 200
+    assert "text/markdown" in res.headers["content-type"]
+    assert ".md" in res.headers.get("content-disposition", "")
+    body = res.text
+    assert body.startswith("# clearscript library")
+    assert "MarkdownMe" in body
+
+
 def test_project_summary_carries_rerun_of_pointer(app_client) -> None:
     """A reran project must surface rerun_of in /api/projects so the UI
     can render the provenance badge.
