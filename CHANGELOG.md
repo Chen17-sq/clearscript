@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.17] - 2026-05-23
+
+### Fixed — Empty env var no longer fakes a set credential
+
+While smoke-testing v0.0.16 immediately after shipping it, the claude
+provider pill showed ``has_key=True`` but ``key_source=null`` —
+contradictory state. Root cause: ``ANTHROPIC_API_KEY=`` (declared but
+blank, common when someone half-set their shell config) returned ``""``
+from ``resolve_api_key()``, which the server's ``has_key`` check
+treated as a valid credential via ``is not None``.
+
+User impact: the pill looks enabled, the user clicks Run, and gets a
+401 from the provider with no clear message.
+
+Fix: ``ProviderConfig.resolve_api_key()`` now strips and treats empty
+strings as "no key" across all three sources (inline TOML / keyring /
+env). Regression-tested in a new ``test_config.py`` covering 9 cases:
+priority ordering, empty values at each source, keyring failure
+fallback, inline-config-wins.
+
+### Tests
+
+256 → **265** (+9). New ``test_config.py``. Ruff clean.
+
 ## [0.0.16] - 2026-05-23
 
 ### Fixed — In-app API key input
