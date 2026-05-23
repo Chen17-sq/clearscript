@@ -346,3 +346,161 @@ def test_session_finish_records_tokens(tmp_library) -> None:
     # The session row should be findable in stats.
     stats = tmp_library.stats()
     assert stats["sessions"] >= 1
+
+
+# ============ Export / Import / Bulk ============
+
+
+def test_export_dict_has_versioned_format(tmp_library) -> None:
+    """The export must carry a format marker so future versions can detect
+    incompatible files instead of silently corrupting state.
+    """
+    tmp_library.add_term(canonical="Tavily", aliases=["Tabby"])
+    payload = tmp_library.export_dict()
+    assert payload["format"] == "clearscript-library-export"
+    assert "schema_version" in payload
+    assert isinstance(payload["terms"], list)
+    assert isinstance(payload["speakers"], list)
+
+
+def test_export_dict_round_trip_through_import(tmp_library, tmp_path) -> None:
+    """Export → write JSON → read JSON → import into fresh library must
+    produce identical canonicals and alias mappings.
+    """
+    from clearscript.library import Library
+
+    # Seed the source library with diverse content.
+    tmp_library.add_term(canonical="Dify", aliases=["DeFi", "底牌"], type_="company")
+    tmp_library.add_term(canonical="Tavily", aliases=["Tabby"], type_="company")
+    tmp_library.add_speaker(
+        canonical_name="Siqi",
+        display_label="Siqi：",
+        aliases=["Speaker 1"],
+    )
+    tmp_library.add_edit_pattern(
+        title="Trim filler",
+        trigger_desc="嗯/啊",
+        action="drop",
+        rationale="filler",
+    )
+    tmp_library.add_negative(text="蛮好的", do_not_change_to="很好")
+
+    import json
+
+    export_path = tmp_path / "export.json"
+    export_path.write_text(
+        json.dumps(tmp_library.export_dict(), ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    # Import into a brand-new library.
+    target = Library(tmp_path / "target.db")
+    try:
+        summary = target.import_dict(json.loads(export_path.read_text(encoding="utf-8")))
+        assert summary["terms_added"] == 2
+        assert summary["speakers_added"] == 1
+        assert summary["patterns_added"] == 1
+        assert summary["negatives_added"] == 1
+
+        # Every alias resolves to the right canonical.
+        for alias, canonical in [
+            ("DeFi", "Dify"),
+            ("底牌", "Dify"),
+            ("Tabby", "Tavily"),
+        ]:
+            hit = target.lookup_alias(alias)
+            assert hit is not None and hit.canonical == canonical
+
+        spk = target.lookup_speaker("Speaker 1")
+        assert spk is not None and spk.canonical_name == "Siqi"
+    finally:
+        target.close()
+
+
+def test_import_dict_rejects_payload_without_format(tmp_library) -> None:
+    """A random JSON file shouldn't be accepted — only well-formed exports."""
+    import pytest
+
+    with pytest.raises(ValueError, match="format"):
+        tmp_library.import_dict({"terms": []})
+
+
+def test_import_dict_merges_aliases_into_existing_term(tmp_library) -> None:
+    """If the target library already has 'Tavily', importing more aliases
+    for it must extend, not replace.
+    """
+    tmp_library.add_term(canonical="Tavily", aliases=["TablyAI"])
+    payload = {
+        "format": "clearscript-library-export",
+        "schema_version": 1,
+        "terms": [{"canonical": "Tavily", "aliases": ["Tabby", "Tably"]}],
+        "speakers": [],
+        "edit_patterns": [],
+        "negatives": [],
+    }
+    summary = tmp_library.import_dict(payload)
+    assert summary["terms_merged"] == 1
+    assert summary["terms_added"] == 0
+    # Both old and new aliases work.
+    for alias in ("TablyAI", "Tabby", "Tably"):
+        assert tmp_library.lookup_alias(alias).canonical == "Tavily"
+
+
+def test_import_dict_skips_malformed_entries(tmp_library) -> None:
+    """Empty or invalid records must be counted as skipped, not crash."""
+    payload = {
+        "format": "clearscript-library-export",
+        "schema_version": 1,
+        "terms": [
+            {"canonical": "ValidTerm", "aliases": []},
+            {"canonical": ""},  # skipped
+            {},  # skipped
+        ],
+        "speakers": [
+            {"canonical_name": "", "display_label": "x"},  # skipped
+            {"canonical_name": "Real", "display_label": "Real：", "aliases": []},
+        ],
+        "edit_patterns": [
+            {"title": "ok", "trigger_desc": "", "action": ""},  # skipped
+        ],
+        "negatives": [],
+    }
+    summary = tmp_library.import_dict(payload)
+    assert summary["terms_added"] == 1
+    assert summary["speakers_added"] == 1
+    assert summary["skipped"] >= 3
+
+
+def test_export_excludes_deprecated_terms(tmp_library) -> None:
+    """Deprecated (rejected) terms must not leak into exports — otherwise
+    sharing a library re-introduces the user's rejected entries.
+    """
+    keep_id = tmp_library.add_term(canonical="Keep", aliases=["keep"])
+    drop_id = tmp_library.add_term(canonical="Drop", aliases=["drop"])
+    tmp_library.reject_term(drop_id)
+
+    payload = tmp_library.export_dict()
+    canonicals = {t["canonical"] for t in payload["terms"]}
+    assert "Keep" in canonicals
+    assert "Drop" not in canonicals
+    assert keep_id != drop_id  # sanity that they are distinct rows
+
+
+def test_bulk_delete_terms_returns_count(tmp_library) -> None:
+    a = tmp_library.add_term(canonical="A", aliases=["a"])
+    b = tmp_library.add_term(canonical="B", aliases=["b"])
+    c = tmp_library.add_term(canonical="C")
+
+    deleted = tmp_library.bulk_delete_terms([a, b, 99_999])  # 99_999 doesn't exist
+    assert deleted == 2  # only a and b
+    # C still there.
+    assert tmp_library.lookup_alias("C") is not None
+    # A and B aliases gone via CASCADE.
+    assert tmp_library.lookup_alias("a") is None
+    assert tmp_library.lookup_alias("b") is None
+    # Re-use c to satisfy linters.
+    assert c > 0
+
+
+def test_bulk_delete_terms_empty_list_is_safe(tmp_library) -> None:
+    assert tmp_library.bulk_delete_terms([]) == 0

@@ -928,6 +928,54 @@ def create_app() -> FastAPI:
         finally:
             lib.close()
 
+    @app.post("/api/library/terms/bulk-delete")
+    def bulk_delete_terms_endpoint(payload: dict) -> dict:
+        ids = payload.get("ids") or []
+        if not isinstance(ids, list) or not all(isinstance(i, int) for i in ids):
+            raise HTTPException(400, "Body must be {ids: [int, ...]}")
+        lib = open_library()
+        try:
+            deleted = lib.bulk_delete_terms(ids)
+            return {"deleted": deleted}
+        finally:
+            lib.close()
+
+    # ============ Library: export / import ============
+
+    @app.get("/api/library/export")
+    def library_export() -> Response:
+        """Download the entire library as a JSON file the user can back up,
+        share with a teammate, or commit to a private repo."""
+        lib = open_library()
+        try:
+            payload = lib.export_dict()
+        finally:
+            lib.close()
+        body = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+        return Response(
+            content=body,
+            media_type="application/json",
+            headers={
+                "Content-Disposition": 'attachment; filename="clearscript-library.json"',
+            },
+        )
+
+    @app.post("/api/library/import")
+    def library_import(payload: dict) -> dict:
+        """Merge an exported library back in. Caller passes the parsed JSON.
+
+        Returns the merge summary (terms_added, terms_merged, etc.).
+        """
+        lib = open_library()
+        try:
+            try:
+                summary = lib.import_dict(payload)
+            except ValueError as exc:
+                raise HTTPException(400, str(exc)) from exc
+            return {"summary": summary}
+        finally:
+            lib.close()
+
     # ============ Library: speakers ============
 
     @app.get("/api/library/speakers")

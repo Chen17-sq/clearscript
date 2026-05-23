@@ -485,6 +485,105 @@ def lib_lookup(
         sys.exit(1)
 
 
+@lib_app.command("search")
+def lib_search(
+    query: str = typer.Argument(..., help="Substring or alias to search for"),
+    limit: int = typer.Option(20, "--limit", "-n", help="Max results"),
+) -> None:
+    """Full-text search across the term library (FTS5-backed).
+
+    Unlike ``lib lookup`` which is an exact alias match, search runs an
+    FTS query so partial matches and typos surface useful hits.
+    """
+    cfg = load_config()
+    ensure_dirs(cfg)
+    library = Library(cfg.library_path)
+    try:
+        hits = library.search_terms(query, limit=limit)
+    finally:
+        library.close()
+    if not hits:
+        console.print(f"[dim]No matches for {query!r}[/dim]")
+        return
+    table = Table(title=f"Library search: {query!r}")
+    table.add_column("Canonical", style="bold")
+    table.add_column("Type")
+    table.add_column("Domain")
+    table.add_column("Confidence", justify="right")
+    for h in hits:
+        table.add_row(
+            h.canonical,
+            h.type or "—",
+            h.domain or "—",
+            f"{h.confidence:.2f}",
+        )
+    console.print(table)
+
+
+@lib_app.command("export")
+def lib_export(
+    out_path: Path = typer.Argument(
+        ..., help="Where to write the library JSON (e.g. ./my-library.json)"
+    ),
+) -> None:
+    """Export the entire library as a JSON file for backup or sharing.
+
+    The file is human-readable, version-tagged, and can be re-imported
+    via ``lib import`` on the same machine or any other clearscript install.
+    """
+    cfg = load_config()
+    ensure_dirs(cfg)
+    library = Library(cfg.library_path)
+    try:
+        payload = library.export_dict()
+    finally:
+        library.close()
+    out_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    console.print(f"[green]✓[/green] wrote library export → {out_path}")
+    console.print(
+        f"[dim]terms: {len(payload['terms'])} · speakers: {len(payload['speakers'])} · "
+        f"patterns: {len(payload['edit_patterns'])} · negatives: {len(payload['negatives'])}[/dim]"
+    )
+
+
+@lib_app.command("import")
+def lib_import(
+    in_path: Path = typer.Argument(
+        ..., exists=True, readable=True, help="Path to a library export JSON"
+    ),
+) -> None:
+    """Merge a library JSON export into the local library.
+
+    Existing terms with a matching canonical have their aliases extended;
+    new terms are inserted. Speakers, patterns, and negatives are merged
+    with the same union semantics.
+    """
+    cfg = load_config()
+    ensure_dirs(cfg)
+    try:
+        payload = json.loads(in_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        err_console.print(f"[red]Failed to read {in_path}: {exc}[/red]")
+        raise typer.Exit(2) from exc
+
+    library = Library(cfg.library_path)
+    try:
+        try:
+            summary = library.import_dict(payload)
+        except ValueError as exc:
+            err_console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(2) from exc
+    finally:
+        library.close()
+
+    console.print(f"[green]✓[/green] imported {in_path}")
+    for k, v in summary.items():
+        console.print(f"  {k}: {v}")
+
+
 def main() -> None:
     app()
 

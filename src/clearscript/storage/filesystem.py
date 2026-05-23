@@ -165,6 +165,9 @@ class Project:
             "suggestion_count": meta.get("suggestion_count", 0),
             "duration_sec": meta.get("duration_sec"),
             "created_at": meta.get("created_at"),
+            # When this project is a rerun, expose the original slug so the
+            # UI can render a "↻ rerun of X" badge.
+            "rerun_of": meta.get("rerun_of"),
         }
 
     def detail(self) -> dict:

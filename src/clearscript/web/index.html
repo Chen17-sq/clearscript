@@ -1463,9 +1463,16 @@
         const dateLabel = p.created_at ? p.created_at.replace('T', ' ').slice(0, 16) : '—';
         const tokensLabel = (p.total_tokens || 0).toLocaleString();
         const formatPill = `<span class="border-2 border-ink bg-white text-ink px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-widest mr-1">${escapeHtml(p.format || '?')}</span>`;
+        // Rerun-of badge: shows when this project is a rerun of another.
+        // Lets the user trace provenance at a glance without opening the
+        // detail panel.
+        const rerunBadge = p.rerun_of
+          ? `<span class="border-2 border-ink bg-blue text-white px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-widest" title="Rerun of ${escapeHtml(p.rerun_of)}">↻ rerun</span>`
+          : '';
         card.innerHTML = `
           <div class="flex items-start gap-2 mb-1">
             ${formatPill}
+            ${rerunBadge}
             <span class="font-bold text-sm flex-1 truncate">${escapeHtml(p.title || p.slug)}</span>
           </div>
           <div class="text-[11px] font-mono text-ink/60 flex items-center gap-3">

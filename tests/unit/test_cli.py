@@ -138,6 +138,85 @@ def test_projects_rerun_missing_slug_exits_with_error(cli_env) -> None:
     # Error printed via stderr is captured by runner — check stdout for friendly msg.
 
 
+def test_lib_search_command(cli_env) -> None:
+    """`clearscript lib search` returns a Rich table of matching canonicals."""
+    from clearscript.config import load_config
+    from clearscript.library import Library
+
+    cfg = load_config()
+    lib = Library(cfg.library_path)
+    lib.add_term(canonical="Anthropic", aliases=["iShopee"])
+    lib.add_term(canonical="OpenAI", aliases=["O AI"])
+    lib.close()
+
+    result = runner.invoke(app, ["lib", "search", "Anthropic"])
+    assert result.exit_code == 0
+    assert "Anthropic" in result.stdout
+
+
+def test_lib_search_empty_result(cli_env) -> None:
+    result = runner.invoke(app, ["lib", "search", "DefinitelyNotInLibrary"])
+    assert result.exit_code == 0
+    assert "No matches" in result.stdout
+
+
+def test_lib_export_writes_json(cli_env, tmp_path) -> None:
+    """`clearscript lib export <path>` writes a valid versioned export."""
+    import json
+
+    from clearscript.config import load_config
+    from clearscript.library import Library
+
+    cfg = load_config()
+    lib = Library(cfg.library_path)
+    lib.add_term(canonical="ExportMe", aliases=["em"])
+    lib.close()
+
+    export_path = tmp_path / "exported.json"
+    result = runner.invoke(app, ["lib", "export", str(export_path)])
+    assert result.exit_code == 0, result.stdout
+    assert export_path.is_file()
+
+    payload = json.loads(export_path.read_text(encoding="utf-8"))
+    assert payload["format"] == "clearscript-library-export"
+    canonicals = {t["canonical"] for t in payload["terms"]}
+    assert "ExportMe" in canonicals
+
+
+def test_lib_import_round_trip(cli_env, tmp_path) -> None:
+    """Export then import — terms survive the round trip via CLI."""
+    import json
+
+    payload = {
+        "format": "clearscript-library-export",
+        "schema_version": 1,
+        "terms": [
+            {"canonical": "ImportedTerm", "aliases": ["it"], "type": "company"}
+        ],
+        "speakers": [],
+        "edit_patterns": [],
+        "negatives": [],
+    }
+    import_path = tmp_path / "to-import.json"
+    import_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = runner.invoke(app, ["lib", "import", str(import_path)])
+    assert result.exit_code == 0, result.stdout
+    assert "terms_added: 1" in result.stdout
+
+    # Verify the term is now searchable.
+    lookup = runner.invoke(app, ["lib", "lookup", "it"])
+    assert lookup.exit_code == 0
+    assert "ImportedTerm" in lookup.stdout
+
+
+def test_lib_import_rejects_non_json(cli_env, tmp_path) -> None:
+    bad_path = tmp_path / "junk.json"
+    bad_path.write_text("this is not json {{{", encoding="utf-8")
+    result = runner.invoke(app, ["lib", "import", str(bad_path)])
+    assert result.exit_code == 2
+
+
 def test_lib_lookup_command(cli_env) -> None:
     """`clearscript lib lookup <alias>` finds seeded terms."""
     # Force-install seed pack first by opening server which auto-seeds.

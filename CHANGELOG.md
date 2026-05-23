@@ -7,6 +7,81 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.12] - 2026-05-23
+
+### The library-as-portable-artifact release.
+
+Until v0.0.11, your terminology library was a SQLite file at
+``~/Documents/clearscript/data/library/library.db``. You could not back
+it up cleanly, share it with a teammate, or version it in git without
+exporting the raw binary. v0.0.12 fixes that, plus a sweep of UI polish
+and SDK-level test coverage.
+
+### Added — Library export / import
+
+- ``GET /api/library/export`` returns a versioned JSON blob containing
+  every term + alias + speaker + edit pattern + negative rule. Deprecated
+  (rejected) terms are excluded by design so sharing a library doesn't
+  re-introduce someone else's rejections into yours.
+- ``POST /api/library/import`` merges an export back in. Existing terms
+  with the same canonical have their aliases extended (union, not
+  replace); new terms are inserted; malformed records are counted as
+  ``skipped`` rather than crashing.
+- **CLI**: ``clearscript lib export <path>`` / ``clearscript lib import <path>``.
+- Format marker (``"format": "clearscript-library-export"``) on every
+  export so future versions can detect incompatible files instead of
+  silently corrupting state.
+
+### Added — CLI ``lib search``
+
+``clearscript lib lookup`` did exact alias matching only. ``lib search`` runs
+the FTS5 query against the term table so partial matches and typos
+surface useful hits. Output is a Rich table with canonical / type /
+domain / confidence columns.
+
+### Added — Bulk delete
+
+``POST /api/library/terms/bulk-delete`` accepts ``{ids: [int, ...]}`` and
+deletes them in one round trip, with cascade to aliases. Returns the
+count actually deleted so the UI can show "Deleted N terms".
+
+### Added — Rerun-of badge in the projects list
+
+A re-run project carries ``rerun_of: <orig_slug>`` in its meta. v0.0.12
+exposes this in ``/api/projects`` summaries and the web UI renders a
+``↻ rerun`` badge on the project card with a tooltip pointing to the
+original slug. Provenance is now visible at a glance.
+
+### Added — Real-SDK provider test coverage
+
+Until now, ``AnthropicProvider`` and ``OpenAICompatProvider`` were only
+exercised through ``_BaseProvider`` fallbacks. A regression in SDK call
+shape (renamed field, changed kwarg) would slip past CI. ``test_provider_sdks.py``
+now covers:
+
+- The SDK kwargs Anthropic gets called with (model, system extraction,
+  messages, max_tokens default).
+- Multiple system messages joined with ``\n\n``.
+- Non-text content blocks (tool_use) being ignored gracefully.
+- The streaming context-manager protocol Anthropic uses.
+- OpenAI-compat's ``include_usage`` stream option capturing real token
+  counts from the final chunk.
+- Fallback estimate when usage isn't reported.
+
+### Tests
+
+217 tests total (up from 191):
+- ``test_library.py``: 9 new (export shape, round trip, idempotency,
+  bulk delete edge cases, malformed import handling, deprecated
+  terms excluded from export).
+- ``test_server.py``: 6 new (export download, import endpoint, bulk
+  delete endpoint, rerun_of summary surfacing).
+- ``test_cli.py``: 6 new (search, export, import round trip, error
+  handling).
+- ``test_provider_sdks.py``: 7 new file.
+
+All passing. Ruff clean.
+
 ## [0.0.11] - 2026-05-16
 
 ### The actually-using-the-library release.

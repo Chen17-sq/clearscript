@@ -613,5 +613,205 @@ class Library:
             "sessions": sessions,
         }
 
+    # --- Export / Import ---
+
+    def export_dict(self) -> dict:
+        """Serialize the full library to a plain dict (suitable for JSON).
+
+        The shape is versioned (``schema_version``) so future imports can
+        migrate from older exports. Includes terms (with aliases), speakers
+        (with aliases), edit patterns, and negative rules. ``sessions`` and
+        ``applied_corrections`` are tracking data, not portable knowledge,
+        so they're excluded by design.
+        """
+        term_rows = self._conn.execute(
+            "SELECT id, canonical, type, domain, status, confidence, definition, notes "
+            "FROM terms WHERE status != 'deprecated'"
+        ).fetchall()
+        terms: list[dict] = []
+        for r in term_rows:
+            aliases = [
+                row["alias"]
+                for row in self._conn.execute(
+                    "SELECT alias FROM term_aliases WHERE term_id = ?", (r["id"],)
+                ).fetchall()
+            ]
+            terms.append(
+                {
+                    "canonical": r["canonical"],
+                    "type": r["type"],
+                    "domain": r["domain"],
+                    "status": r["status"],
+                    "confidence": r["confidence"],
+                    "definition": r["definition"],
+                    "notes": r["notes"],
+                    "aliases": aliases,
+                }
+            )
+
+        speaker_rows = self._conn.execute(
+            "SELECT id, canonical_name, display_label, primary_language, notes FROM speakers"
+        ).fetchall()
+        speakers: list[dict] = []
+        for r in speaker_rows:
+            aliases = [
+                row["alias"]
+                for row in self._conn.execute(
+                    "SELECT alias FROM speaker_aliases WHERE speaker_id = ?", (r["id"],)
+                ).fetchall()
+            ]
+            speakers.append(
+                {
+                    "canonical_name": r["canonical_name"],
+                    "display_label": r["display_label"],
+                    "primary_language": r["primary_language"],
+                    "notes": r["notes"],
+                    "aliases": aliases,
+                }
+            )
+
+        patterns = [
+            dict(row)
+            for row in self._conn.execute(
+                "SELECT title, trigger_desc, action, rationale, domain FROM edit_patterns"
+            ).fetchall()
+        ]
+
+        negatives = [
+            dict(row)
+            for row in self._conn.execute(
+                "SELECT text, do_not_change_to, domain, reason FROM negative_corrections"
+            ).fetchall()
+        ]
+
+        return {
+            "schema_version": 1,
+            "format": "clearscript-library-export",
+            "terms": terms,
+            "speakers": speakers,
+            "edit_patterns": patterns,
+            "negatives": negatives,
+        }
+
+    def import_dict(self, payload: dict) -> dict:
+        """Merge a library export into this library.
+
+        Strategy: union of records — terms with a matching canonical have
+        their aliases extended; speakers with a matching canonical_name
+        get their aliases extended; patterns and negatives are inserted
+        verbatim (relying on UNIQUE constraints to dedupe).
+
+        Returns a summary: ``{terms_added, terms_merged, speakers_added,
+        speakers_merged, patterns_added, negatives_added, skipped}``.
+        """
+        if not isinstance(payload, dict):
+            raise ValueError("import payload must be a dict")
+        if payload.get("format") != "clearscript-library-export":
+            raise ValueError(
+                "import payload missing 'format: clearscript-library-export' marker"
+            )
+
+        result = {
+            "terms_added": 0,
+            "terms_merged": 0,
+            "speakers_added": 0,
+            "speakers_merged": 0,
+            "patterns_added": 0,
+            "negatives_added": 0,
+            "skipped": 0,
+        }
+
+        for t in payload.get("terms", []):
+            canonical = (t.get("canonical") or "").strip()
+            if not canonical:
+                result["skipped"] += 1
+                continue
+            existing = self._conn.execute(
+                "SELECT id FROM terms WHERE canonical = ?", (canonical,)
+            ).fetchone()
+            self.add_term(
+                canonical=canonical,
+                type_=t.get("type"),
+                domain=t.get("domain"),
+                aliases=t.get("aliases", []) or [],
+            )
+            if existing:
+                result["terms_merged"] += 1
+            else:
+                result["terms_added"] += 1
+
+        for s in payload.get("speakers", []):
+            cn = (s.get("canonical_name") or "").strip()
+            dl = (s.get("display_label") or "").strip()
+            if not cn or not dl:
+                result["skipped"] += 1
+                continue
+            existing = self._conn.execute(
+                "SELECT id FROM speakers WHERE canonical_name = ?", (cn,)
+            ).fetchone()
+            self.add_speaker(
+                canonical_name=cn,
+                display_label=dl,
+                aliases=s.get("aliases", []) or [],
+                primary_language=s.get("primary_language"),
+            )
+            if existing:
+                result["speakers_merged"] += 1
+            else:
+                result["speakers_added"] += 1
+
+        for p in payload.get("edit_patterns", []):
+            title = (p.get("title") or "").strip()
+            trigger = (p.get("trigger_desc") or "").strip()
+            action = (p.get("action") or "").strip()
+            if not (title and trigger and action):
+                result["skipped"] += 1
+                continue
+            self.add_edit_pattern(
+                title=title,
+                trigger_desc=trigger,
+                action=action,
+                rationale=p.get("rationale"),
+                domain=p.get("domain"),
+            )
+            result["patterns_added"] += 1
+
+        for n in payload.get("negatives", []):
+            text = (n.get("text") or "").strip()
+            if not text:
+                result["skipped"] += 1
+                continue
+            self.add_negative(
+                text=text,
+                do_not_change_to=n.get("do_not_change_to"),
+                domain=n.get("domain"),
+                reason=n.get("reason"),
+            )
+            result["negatives_added"] += 1
+
+        return result
+
+    def bulk_delete_terms(self, term_ids: list[int]) -> int:
+        """Delete multiple terms by id; returns the number actually deleted.
+
+        Aliases cascade via ON DELETE CASCADE in the schema.
+        """
+        if not term_ids:
+            return 0
+        # First find which IDs actually exist so we can return a truthful count.
+        check_placeholders = ",".join("?" * len(term_ids))
+        present = self._conn.execute(
+            f"SELECT id FROM terms WHERE id IN ({check_placeholders})", term_ids
+        ).fetchall()
+        ids_present = [r["id"] for r in present]
+        if not ids_present:
+            return 0
+        # Now rebuild placeholders for the *actual* deletion set.
+        delete_placeholders = ",".join("?" * len(ids_present))
+        self._conn.execute(
+            f"DELETE FROM terms WHERE id IN ({delete_placeholders})", ids_present
+        )
+        return len(ids_present)
+
     def close(self) -> None:
         self._conn.close()

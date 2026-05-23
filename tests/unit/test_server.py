@@ -607,6 +607,111 @@ def test_rerun_with_explicit_provider_override(app_client) -> None:
     assert "project_slug" in body
 
 
+def test_library_export_returns_download(app_client) -> None:
+    """The /api/library/export endpoint must return a JSON download with
+    the right Content-Disposition so browsers prompt 'Save As'.
+    """
+    client, _ = app_client
+    # Add a term first so the export has something to serialize.
+    client.post(
+        "/api/library/terms",
+        json={"canonical": "Tavily", "aliases": ["Tabby"], "type": "company"},
+    )
+    res = client.get("/api/library/export")
+    assert res.status_code == 200
+    assert res.headers["content-type"].startswith("application/json")
+    assert "clearscript-library.json" in res.headers.get(
+        "content-disposition", ""
+    )
+    body = res.json()
+    assert body["format"] == "clearscript-library-export"
+    canonicals = {t["canonical"] for t in body["terms"]}
+    assert "Tavily" in canonicals
+
+
+def test_library_export_then_import_into_self_is_idempotent(app_client) -> None:
+    """Exporting and re-importing the same payload must merge cleanly,
+    not duplicate. The library's UNIQUE constraints handle it.
+    """
+    client, _ = app_client
+    client.post(
+        "/api/library/terms",
+        json={"canonical": "Manus", "aliases": ["Minus"], "type": "company"},
+    )
+    export = client.get("/api/library/export").json()
+    before = client.get("/api/library/stats").json()["terms"]
+
+    res = client.post("/api/library/import", json=export)
+    assert res.status_code == 200
+    assert "summary" in res.json()
+
+    after = client.get("/api/library/stats").json()["terms"]
+    assert after == before  # idempotent — no duplicate rows
+
+
+def test_library_import_rejects_garbage_payload(app_client) -> None:
+    client, _ = app_client
+    res = client.post(
+        "/api/library/import",
+        json={"random": "shape", "without": "format marker"},
+    )
+    assert res.status_code == 400
+
+
+def test_library_bulk_delete_endpoint(app_client) -> None:
+    client, _ = app_client
+    # Create three terms.
+    ids = []
+    for canonical in ("Alpha", "Beta", "Gamma"):
+        res = client.post(
+            "/api/library/terms",
+            json={"canonical": canonical, "aliases": []},
+        )
+        ids.append(res.json()["id"])
+
+    res = client.post(
+        "/api/library/terms/bulk-delete",
+        json={"ids": ids[:2]},  # delete Alpha + Beta
+    )
+    assert res.status_code == 200
+    assert res.json()["deleted"] == 2
+
+    # Gamma still there.
+    listing = client.get("/api/library/terms").json()["terms"]
+    canonicals = {t["canonical"] for t in listing}
+    assert "Gamma" in canonicals
+    assert "Alpha" not in canonicals
+    assert "Beta" not in canonicals
+
+
+def test_library_bulk_delete_rejects_non_int_ids(app_client) -> None:
+    client, _ = app_client
+    res = client.post(
+        "/api/library/terms/bulk-delete",
+        json={"ids": ["not-an-int", 5]},
+    )
+    assert res.status_code == 400
+
+
+def test_project_summary_carries_rerun_of_pointer(app_client) -> None:
+    """A reran project must surface rerun_of in /api/projects so the UI
+    can render the provenance badge.
+    """
+    client, _ = app_client
+    orig = client.post(
+        "/api/run", json={"transcript": "Speaker 1: original.\n"}
+    ).json()["project_slug"]
+    with client.stream(
+        "POST", f"/api/projects/{orig}/rerun", json={}
+    ) as res:
+        "".join(res.iter_text())
+        assert res.status_code == 200
+
+    projects = client.get("/api/projects").json()["projects"]
+    rerun_entries = [p for p in projects if p.get("rerun_of") == orig]
+    assert rerun_entries, "rerun_of must be exposed in project list"
+
+
 def test_export_docx_returns_binary(app_client) -> None:
     client, _ = app_client
     res = client.post(
