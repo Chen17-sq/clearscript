@@ -7,6 +7,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.18] - 2026-05-23
+
+### Added — Library Bootstrap: the answer to "why not just ChatGPT?"
+
+Real user pushback during /goal session: *"感觉就是不好用，这产品的核心是啥？"*
+The complaint had a real diagnosis: clearscript's compounding library
+is its moat, but the moat only emerges *after* 5-10 cleanups. The first
+few runs are no better than ChatGPT. User insight from the same
+conversation: *"可以先输入那些稿子，在这里面解析出来一些。这样的话就不用等一篇一篇地处理。"*
+**Bootstrap inverts the curve.** Drop a stack of past transcripts ONCE,
+extract candidate library entries upfront, accept in one click, then
+start cleaning with a warm library on run #1.
+
+### Components
+
+- **New prompt** ``prompts/stages/00_library_bootstrap.md`` — pure
+  entity extraction, JSON output, no rewriting. ~10× cheaper than full
+  cleanup per transcript.
+- **New module** ``core/bootstrap.py`` — ``bootstrap_from_transcripts``
+  runs the prompt over each input, aggregates candidates with
+  per-transcript frequency (verbose speakers don't get extra weight),
+  unions alias sets, fails soft per-transcript (one garbled response
+  doesn't kill the batch).
+- **New endpoint** ``POST /api/library/bootstrap`` (SSE) — emits
+  ``plan / transcript_start / transcript_done / transcript_error /
+  complete``. Hard cap of 50 transcripts per batch to bound spend.
+- **New CLI command** ``clearscript lib bootstrap <files>...
+  [--accept-all] [--min-seen N]`` — Rich table of candidates ranked
+  by frequency, optional auto-accept for power users.
+- **New web UI** — yellow CTA card on the editor view when the
+  library has only the seed pack (≤17 terms). Opens a modal with:
+  drag-drop multi-file (cap 50), per-file progress with live log,
+  results table with checkboxes (default all selected) sorted by
+  ``times_seen``, Select-all / Accept-selected buttons. Closes by
+  itself and refreshes the library stats when done.
+
+### Why this is the killer feature
+
+It's the **only** explanation for "why install clearscript instead of
+pasting into ChatGPT". Without bootstrap: library compounds across 10
+runs, slowly. With bootstrap: library is already armed before run #1.
+A user who has 20 past founder interviews sitting in a folder can
+warm clearscript on those in ~5 minutes (one cheap extraction pass
+each) and have it dial in their portfolio companies, their jargon,
+their recurring speakers — *before* they clean a single new
+transcript.
+
+### Tests
+
+265 → **284** (+19). All passing. Ruff clean.
+
+- ``test_bootstrap.py`` (new file, 14 tests): aggregation contract
+  (alias union, per-transcript count not per-mention, sort by
+  frequency, speaker shape, empty array OK, malformed entries
+  dropped), error handling (one failed transcript doesn't kill
+  batch), response parsing (fenced markdown, prose-wrapped JSON,
+  garbage returns empty).
+- ``test_server.py``: +4 (endpoint streams events, rejects empty,
+  rejects >50, end-to-end bootstrap→accept→library)
+- ``test_cli.py``: +1 (bootstrap --accept-all writes to library)
+
 ## [0.0.17] - 2026-05-23
 
 ### Fixed — Empty env var no longer fakes a set credential

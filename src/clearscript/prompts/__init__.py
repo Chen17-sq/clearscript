@@ -69,4 +69,19 @@ def compose_edit_prompt(briefing_context: str = "", library_context: str = "") -
     return "".join(parts)
 
 
-__all__ = ["compose_edit_prompt", "load_prompt"]
+def compose_bootstrap_prompt() -> str:
+    """Compose the system prompt for the Library Bootstrap stage.
+
+    Bootstrap mode does pure entity extraction — no rewriting, no
+    cleaning, no chunking. Used by ``Pipeline.bootstrap_from_texts``
+    to surface library candidates across a batch of past transcripts
+    before the user starts cleaning new ones.
+    """
+    return (
+        load_prompt("system_base")
+        + "\n\n---\n\n"
+        + load_prompt("stages/00_library_bootstrap")
+    )
+
+
+__all__ = ["compose_bootstrap_prompt", "compose_edit_prompt", "load_prompt"]

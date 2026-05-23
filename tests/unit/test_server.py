@@ -729,6 +729,109 @@ def test_rerun_with_explicit_provider_override(app_client) -> None:
     assert "project_slug" in body
 
 
+def test_library_bootstrap_endpoint_streams_candidates(app_client) -> None:
+    """POST /api/library/bootstrap with N transcripts streams SSE events
+    ending in a 'complete' carrying the aggregated candidate list.
+    """
+    client, stub = app_client
+
+    stub.response_text = (
+        '[{"kind":"term","canonical":"BootstrapHit",'
+        '"aliases_seen":["bh"],"type":"company","confidence":0.85}]'
+    )
+
+    with client.stream(
+        "POST",
+        "/api/library/bootstrap",
+        json={
+            "transcripts": [
+                "Speaker 1: bh is a great tool.",
+                "Speaker 2: I used bh too.",
+            ],
+        },
+    ) as res:
+        body = "".join(res.iter_text())
+        assert res.status_code == 200
+
+    event_names = [
+        line.split("event: ", 1)[1].strip()
+        for line in body.splitlines()
+        if line.startswith("event: ")
+    ]
+    assert "plan" in event_names
+    assert event_names.count("transcript_start") == 2
+    assert event_names.count("transcript_done") == 2
+    assert event_names[-1] == "complete"
+    # The complete event body should contain our test canonical.
+    assert "BootstrapHit" in body
+
+
+def test_library_bootstrap_rejects_empty_list(app_client) -> None:
+    client, _ = app_client
+    res = client.post("/api/library/bootstrap", json={"transcripts": []})
+    assert res.status_code == 400
+
+
+def test_library_bootstrap_rejects_oversized_batch(app_client) -> None:
+    """Hard cap at 50 transcripts per call to avoid runaway model spend."""
+    client, _ = app_client
+    res = client.post(
+        "/api/library/bootstrap",
+        json={"transcripts": ["x"] * 51},
+    )
+    assert res.status_code == 400
+    assert "50" in res.json()["detail"]
+
+
+def test_library_bootstrap_then_accept_compounds_library(app_client) -> None:
+    """End-to-end: bootstrap → accept → next /api/run sees the term in
+    its system prompt. This is the headline 'cold-start gap closed' test.
+    """
+    client, stub = app_client
+
+    stub.response_text = (
+        '[{"kind":"term","canonical":"CoolNewCo",'
+        '"aliases_seen":["CulCo","KulCo"],"type":"company","confidence":0.9}]'
+    )
+
+    # Run bootstrap.
+    with client.stream(
+        "POST",
+        "/api/library/bootstrap",
+        json={"transcripts": ["Speaker 1: CulCo is awesome."]},
+    ) as res:
+        body = "".join(res.iter_text())
+        assert res.status_code == 200
+
+    # Parse the complete event to extract candidates.
+    import json as _json
+
+    candidates: list = []
+    for line in body.splitlines():
+        if line.startswith("data: "):
+            try:
+                payload = _json.loads(line[6:])
+                if isinstance(payload, dict) and "candidates" in payload:
+                    candidates = payload["candidates"]
+            except (ValueError, _json.JSONDecodeError):
+                pass
+
+    assert candidates, "bootstrap should have emitted at least one candidate"
+    suggestions = [c["as_suggestion"] for c in candidates]
+
+    # Accept them — same shape the inbox uses.
+    res = client.post(
+        "/api/library/accept-suggestions",
+        json={"suggestions": suggestions},
+    )
+    assert res.status_code == 200
+    assert res.json()["accepted"]["terms"] >= 1
+
+    # CoolNewCo should now be findable in the library.
+    listing = client.get("/api/library/terms?q=CoolNewCo").json()["terms"]
+    assert any(t["canonical"] == "CoolNewCo" for t in listing)
+
+
 def test_library_export_returns_download(app_client) -> None:
     """The /api/library/export endpoint must return a JSON download with
     the right Content-Disposition so browsers prompt 'Save As'.

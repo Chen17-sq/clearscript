@@ -407,6 +407,65 @@ def test_set_key_delete_removes(cli_env, monkeypatch) -> None:
     assert ("clearscript", "openai") not in saved
 
 
+def test_lib_bootstrap_accept_all(cli_env, tmp_path) -> None:
+    """`clearscript lib bootstrap <files> --accept-all` writes terms.
+
+    Uses the CliMockProvider's default response — but for bootstrap we
+    need it to emit a JSON array of candidates, so we swap it out.
+    """
+    # Override the provider builder to return a stub that emits a JSON
+    # bootstrap response on the first chat() call.
+    from clearscript.providers.base import ChatResponse
+
+    class BootstrapStub:
+        name = "bootstrap-stub"
+
+        def chat(self, messages, model, **kwargs):  # type: ignore[no-untyped-def]
+            return ChatResponse(
+                text=(
+                    '[{"kind":"term","canonical":"CliBootstrapTerm",'
+                    '"aliases_seen":["cbt"],"type":"company","confidence":0.9}]'
+                ),
+                input_tokens=50,
+                output_tokens=20,
+                model=model,
+                provider=self.name,
+                latency_ms=1.0,
+            )
+
+        def stream(self, *a, **k):  # type: ignore[no-untyped-def]
+            yield ""
+
+        def chat_with_progress(self, *a, **k):  # type: ignore[no-untyped-def]
+            yield ("done", self.chat(*a, **k))
+
+    import clearscript.cli as cli_module
+
+    cli_module.build_provider = lambda _c: BootstrapStub()
+
+    f1 = tmp_path / "a.txt"
+    f1.write_text("Speaker 1: cbt is great.\n", encoding="utf-8")
+    f2 = tmp_path / "b.txt"
+    f2.write_text("Speaker 2: cbt again.\n", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        ["lib", "bootstrap", str(f1), str(f2), "--accept-all", "--provider", "claude"],
+    )
+    assert result.exit_code == 0, result.stdout
+    assert "CliBootstrapTerm" in result.stdout
+
+    # Verify the term is in the library.
+    from clearscript.config import load_config
+    from clearscript.library import Library
+
+    lib = Library(load_config().library_path)
+    hit = lib.lookup_alias("CliBootstrapTerm")
+    lib.close()
+    assert hit is not None
+    assert hit.canonical == "CliBootstrapTerm"
+
+
 def test_lib_lookup_command(cli_env) -> None:
     """`clearscript lib lookup <alias>` finds seeded terms."""
     # Force-install seed pack first by opening server which auto-seeds.

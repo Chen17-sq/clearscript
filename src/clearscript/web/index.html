@@ -147,6 +147,24 @@
         </header>
 
         <div class="p-5">
+          <!-- Bootstrap CTA: shown when library has only the seed pack. -->
+          <div id="bootstrap-cta" class="hidden border-4 border-ink bg-yellow text-ink p-4 mb-4 shadow-bauhaus-lg">
+            <div class="flex items-start gap-3">
+              <span class="text-2xl">🚀</span>
+              <div class="flex-1">
+                <div class="font-black uppercase tracking-widest text-sm mb-2">First time? Train clearscript on your past transcripts</div>
+                <div class="text-xs mb-3">
+                  Drop a stack of old ASR transcripts (≤50). One cheap extraction pass per file → aggregated candidate library entries
+                  ranked by how often they appear. Accept the list, then start cleaning — your first run is already armed with your jargon.
+                </div>
+                <div class="flex gap-2">
+                  <button id="bootstrap-open" class="bauhaus-press border-2 border-ink bg-red text-white px-3 py-2 text-[11px] font-bold uppercase tracking-widest shadow-bauhaus-sm hover:opacity-90">🚀 Train clearscript</button>
+                  <button id="bootstrap-dismiss" class="bauhaus-press border-2 border-ink bg-white text-ink px-3 py-2 text-[11px] font-bold uppercase tracking-widest shadow-bauhaus-sm hover:opacity-80">Skip — I'll just clean one</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div id="drop-zone"
             class="border-2 border-dashed border-ink/40 px-4 py-3 mb-3 text-center text-xs font-bold uppercase tracking-widest text-ink/70 cursor-pointer">
             Drop a transcript file · or click to upload · or paste below
@@ -720,6 +738,300 @@
         renderPills();
         if (!haveKey) showFirstRunHelp();
       } catch (e) { setStatus('Failed to load providers: ' + e.message, 'error'); }
+    }
+
+    // ============ Bootstrap (library cold-start) ============
+    function maybeShowBootstrapCTA() {
+      // Called by loadLibStats after every change. Only show if the user
+      // hasn't dismissed in this session and we're on the editor tab.
+      if (state.bootstrapDismissed) return;
+      const cta = document.getElementById('bootstrap-cta');
+      if (cta) cta.classList.remove('hidden');
+    }
+
+    function dismissBootstrapCTA() {
+      state.bootstrapDismissed = true;
+      const cta = document.getElementById('bootstrap-cta');
+      if (cta) cta.classList.add('hidden');
+    }
+
+    function showBootstrapModal() {
+      // Full-screen modal: drag-drop multi-file zone, progress log,
+      // results table with per-candidate Accept checkboxes, Accept all
+      // button. This is the user's primary entry point into clearscript's
+      // moat (the compounding library).
+      const existing = document.getElementById('cs-bootstrap-modal');
+      if (existing) existing.remove();
+      const modal = document.createElement('div');
+      modal.id = 'cs-bootstrap-modal';
+      modal.className = 'fixed inset-0 z-50 bg-ink/60 flex items-center justify-center p-6';
+      modal.innerHTML = `
+        <div class="bg-white border-4 border-ink shadow-bauhaus-lg max-w-5xl w-full max-h-[90vh] flex flex-col">
+          <header class="border-b-4 border-ink bg-red text-white px-5 py-3 flex items-center gap-3">
+            <span class="text-xl">🚀</span>
+            <h3 class="font-black uppercase tracking-widest text-sm">Train clearscript on past transcripts</h3>
+            <span id="cs-bootstrap-status" class="text-[11px] opacity-80 ml-2"></span>
+            <button id="cs-bootstrap-close" class="ml-auto border-2 border-bg bg-white text-ink px-2 py-1 text-[11px] font-bold uppercase">Close</button>
+          </header>
+          <div class="flex-1 overflow-auto p-4">
+            <div id="cs-bs-stage-pick" class="">
+              <p class="text-xs text-ink/70 mb-3">
+                Drop up to 50 transcripts. clearscript will scan each one and surface a deduped list of company / product / person / jargon
+                candidates ranked by how many files they appeared in. Cheaper than full cleaning — typically a few cents for 10-20 transcripts.
+              </p>
+              <div id="cs-bs-drop"
+                class="border-4 border-dashed border-ink p-8 text-center text-xs font-bold uppercase tracking-widest text-ink/70 cursor-pointer bg-bg hover:bg-yellow/30">
+                Drop transcript files here · or click to pick
+                <div class="text-[10px] font-mono text-ink/50 mt-1 normal-case tracking-normal">supported: .txt · .md · .srt · .vtt · .json</div>
+                <input type="file" id="cs-bs-files" multiple accept=".txt,.md,.markdown,.srt,.vtt,.json" class="hidden" />
+              </div>
+              <div id="cs-bs-file-list" class="mt-3 space-y-1"></div>
+              <div class="mt-4 flex items-center gap-3">
+                <button id="cs-bs-run" class="bauhaus-press border-2 border-ink bg-red text-white px-4 py-2 text-xs font-bold uppercase tracking-widest shadow-bauhaus-sm hover:opacity-90 disabled:opacity-40" disabled>▶ Run extraction</button>
+                <span class="text-[11px] text-ink/50">first run typically takes 20-60s per transcript</span>
+              </div>
+            </div>
+
+            <div id="cs-bs-stage-running" class="hidden">
+              <div class="border-4 border-ink p-4 bg-bg">
+                <div class="font-bold uppercase tracking-widest text-xs mb-2">Extracting…</div>
+                <div id="cs-bs-progress-bar" class="h-3 border-2 border-ink bg-white">
+                  <div id="cs-bs-progress-fill" class="h-full bg-red transition-all" style="width: 0%"></div>
+                </div>
+                <div id="cs-bs-progress-counter" class="text-xs font-mono mt-2">0 / 0</div>
+                <div id="cs-bs-progress-log" class="mt-3 max-h-48 overflow-auto text-[11px] font-mono space-y-1 panel-scroll"></div>
+              </div>
+            </div>
+
+            <div id="cs-bs-stage-review" class="hidden">
+              <div class="mb-3 flex items-center gap-3">
+                <span id="cs-bs-result-summary" class="font-bold uppercase tracking-widest text-xs"></span>
+                <button id="cs-bs-select-all" class="ml-auto bauhaus-press border-2 border-ink bg-white text-ink px-3 py-1 text-[11px] font-bold uppercase tracking-widest hover:bg-yellow">✓ Select all</button>
+                <button id="cs-bs-select-none" class="bauhaus-press border-2 border-ink bg-white text-ink px-3 py-1 text-[11px] font-bold uppercase tracking-widest hover:bg-yellow">✗ Select none</button>
+                <button id="cs-bs-accept" class="bauhaus-press border-2 border-ink bg-red text-white px-4 py-1 text-[11px] font-bold uppercase tracking-widest shadow-bauhaus-sm hover:opacity-90">Accept selected →</button>
+              </div>
+              <div id="cs-bs-results" class="space-y-2"></div>
+            </div>
+
+            <div id="cs-bs-stage-done" class="hidden text-center py-12">
+              <div class="text-4xl mb-2">✓</div>
+              <div class="font-black uppercase tracking-widest text-sm mb-2">Library trained</div>
+              <div id="cs-bs-done-detail" class="text-xs text-ink/60 mb-4"></div>
+              <button id="cs-bs-done-close" class="bauhaus-press border-2 border-ink bg-red text-white px-4 py-2 text-xs font-bold uppercase tracking-widest shadow-bauhaus-sm hover:opacity-90">Done — start cleaning</button>
+            </div>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(modal);
+
+      const bsState = { files: [], candidates: [] };
+
+      const showStage = (name) => {
+        ['pick', 'running', 'review', 'done'].forEach((s) => {
+          document.getElementById('cs-bs-stage-' + s).classList.toggle('hidden', s !== name);
+        });
+      };
+
+      const renderFileList = () => {
+        const list = document.getElementById('cs-bs-file-list');
+        if (!bsState.files.length) {
+          list.innerHTML = '<p class="text-xs text-ink/40 italic">No files selected yet.</p>';
+          document.getElementById('cs-bs-run').disabled = true;
+          return;
+        }
+        list.innerHTML = bsState.files.map((f, i) => `
+          <div class="border-2 border-ink bg-bg px-3 py-1 text-xs font-mono flex items-center gap-2">
+            <span class="text-ink/50">${i + 1}.</span>
+            <span class="flex-1 truncate">${escapeHtml(f.name)}</span>
+            <span class="text-ink/50">${(f.size / 1024).toFixed(1)} KB</span>
+            <button data-idx="${i}" class="cs-bs-remove text-ink/60 hover:text-red">×</button>
+          </div>
+        `).join('');
+        document.getElementById('cs-bs-run').disabled = false;
+      };
+
+      const close = () => modal.remove();
+      document.getElementById('cs-bs-close').addEventListener('click', close);
+      modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+
+      const fileInput = document.getElementById('cs-bs-files');
+      const dropZone = document.getElementById('cs-bs-drop');
+      dropZone.addEventListener('click', () => fileInput.click());
+      dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('bg-yellow'); });
+      dropZone.addEventListener('dragleave', () => dropZone.classList.remove('bg-yellow'));
+      dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('bg-yellow');
+        const newFiles = Array.from(e.dataTransfer.files);
+        bsState.files = bsState.files.concat(newFiles).slice(0, 50);
+        renderFileList();
+      });
+      fileInput.addEventListener('change', () => {
+        const newFiles = Array.from(fileInput.files || []);
+        bsState.files = bsState.files.concat(newFiles).slice(0, 50);
+        renderFileList();
+      });
+      document.getElementById('cs-bs-file-list').addEventListener('click', (e) => {
+        if (e.target.classList.contains('cs-bs-remove')) {
+          bsState.files.splice(Number(e.target.dataset.idx), 1);
+          renderFileList();
+        }
+      });
+
+      // Run extraction
+      document.getElementById('cs-bs-run').addEventListener('click', async () => {
+        // Read all files as text upfront.
+        const texts = [];
+        for (const f of bsState.files) {
+          try {
+            texts.push(await f.text());
+          } catch (e) {
+            console.error('failed to read', f.name, e);
+          }
+        }
+        if (!texts.length) return;
+
+        showStage('running');
+        const progressFill = document.getElementById('cs-bs-progress-fill');
+        const progressCounter = document.getElementById('cs-bs-progress-counter');
+        const progressLog = document.getElementById('cs-bs-progress-log');
+        let total = texts.length;
+        let done = 0;
+
+        const appendLog = (msg) => {
+          const div = document.createElement('div');
+          div.textContent = msg;
+          progressLog.appendChild(div);
+          progressLog.scrollTop = progressLog.scrollHeight;
+        };
+
+        try {
+          const res = await fetch('/api/library/bootstrap', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ transcripts: texts }),
+          });
+          if (!res.ok || !res.body) {
+            const detail = await res.text();
+            appendLog(`✗ Failed: ${res.status} ${detail.slice(0, 200)}`);
+            return;
+          }
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          while (true) {
+            const { value, done: streamDone } = await reader.read();
+            if (streamDone) break;
+            buffer += decoder.decode(value, { stream: true });
+            let sep;
+            while ((sep = buffer.indexOf('\n\n')) !== -1) {
+              const block = buffer.slice(0, sep);
+              buffer = buffer.slice(sep + 2);
+              const event = parseSSEBlock(block);
+              if (!event) continue;
+              if (event.name === 'plan') {
+                total = event.data.num_transcripts;
+                progressCounter.textContent = `0 / ${total}`;
+                appendLog(`Plan: ${total} transcript(s)`);
+              } else if (event.name === 'transcript_start') {
+                appendLog(`  ↻ ${event.data.index}/${event.data.total}…`);
+              } else if (event.name === 'transcript_done') {
+                done = event.data.index;
+                progressFill.style.width = (done / total * 100) + '%';
+                progressCounter.textContent = `${done} / ${total} · ${event.data.candidates_so_far} candidates`;
+                appendLog(`  ✓ ${done}/${total} (${event.data.candidates_so_far} candidates so far)`);
+              } else if (event.name === 'transcript_error') {
+                appendLog(`  ✗ #${event.data.index}: ${event.data.detail}`);
+              } else if (event.name === 'complete') {
+                bsState.candidates = event.data.candidates || [];
+                appendLog(`Done — ${bsState.candidates.length} unique candidates extracted.`);
+                renderResults();
+                showStage('review');
+              } else if (event.name === 'error') {
+                appendLog(`✗ ${event.data.detail}`);
+              }
+            }
+          }
+        } catch (err) {
+          appendLog(`✗ Network: ${err.message}`);
+        }
+      });
+
+      const renderResults = () => {
+        const wrap = document.getElementById('cs-bs-results');
+        const summary = document.getElementById('cs-bs-result-summary');
+        summary.textContent = `${bsState.candidates.length} candidates`;
+        if (!bsState.candidates.length) {
+          wrap.innerHTML = '<p class="text-center text-ink/50 italic py-8">No candidates extracted. Try different / longer transcripts.</p>';
+          return;
+        }
+        wrap.innerHTML = bsState.candidates.map((c, i) => {
+          const aliases = (c.aliases_seen || []).map((a) => `<code class="bg-yellow/30 px-1 mr-1 text-[10px]">${escapeHtml(a)}</code>`).join('');
+          const contexts = (c.contexts || []).slice(0, 1).map((ctx) =>
+            `<div class="text-[10px] text-ink/50 italic mt-1">"${escapeHtml(ctx)}"</div>`
+          ).join('');
+          return `
+            <label class="block border-2 border-ink p-3 bg-white cursor-pointer hover:bg-yellow/20" data-idx="${i}">
+              <div class="flex items-start gap-2">
+                <input type="checkbox" class="cs-bs-check mt-1" data-idx="${i}" checked />
+                <div class="flex-1 text-xs">
+                  <div>
+                    <span class="inline-block bg-ink text-white px-1.5 py-0.5 text-[9px] font-bold uppercase mr-2">${escapeHtml(c.kind)}</span>
+                    <span class="font-bold">${escapeHtml(c.canonical)}</span>
+                    ${c.type ? `<span class="ml-2 text-ink/50">(${escapeHtml(c.type)})</span>` : ''}
+                    <span class="ml-2 bg-red text-white px-1.5 py-0.5 text-[9px] font-bold">×${c.times_seen}</span>
+                    <span class="ml-1 text-ink/50 text-[10px]">conf ${c.confidence.toFixed(2)}</span>
+                  </div>
+                  ${aliases ? `<div class="mt-1">aliases: ${aliases}</div>` : ''}
+                  ${contexts}
+                </div>
+              </div>
+            </label>
+          `;
+        }).join('');
+      };
+
+      document.getElementById('cs-bs-select-all').addEventListener('click', () => {
+        modal.querySelectorAll('.cs-bs-check').forEach((cb) => { cb.checked = true; });
+      });
+      document.getElementById('cs-bs-select-none').addEventListener('click', () => {
+        modal.querySelectorAll('.cs-bs-check').forEach((cb) => { cb.checked = false; });
+      });
+
+      document.getElementById('cs-bs-accept').addEventListener('click', async () => {
+        const picks = [];
+        modal.querySelectorAll('.cs-bs-check:checked').forEach((cb) => {
+          const c = bsState.candidates[Number(cb.dataset.idx)];
+          if (c && c.as_suggestion) picks.push(c.as_suggestion);
+        });
+        if (!picks.length) {
+          alert('Nothing selected.');
+          return;
+        }
+        const res = await fetch('/api/library/accept-suggestions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ suggestions: picks }),
+        });
+        if (!res.ok) {
+          alert('Save failed: ' + res.statusText);
+          return;
+        }
+        const accepted = res.json ? await res.json() : null;
+        const a = accepted && accepted.accepted;
+        document.getElementById('cs-bs-done-detail').textContent =
+          a ? `Added: ${a.terms} terms · ${a.speakers} speakers · ${a.patterns} patterns · ${a.skipped} skipped` : 'Done.';
+        showStage('done');
+        dismissBootstrapCTA();
+        await loadLibStats();
+        await refreshInboxBadge();
+      });
+
+      document.getElementById('cs-bs-done-close').addEventListener('click', close);
+
+      // Initial render.
+      renderFileList();
+      showStage('pick');
     }
 
     function showSettingsModal() {
@@ -1589,6 +1901,14 @@
         $('lib-stat-negatives').textContent = data.negative_rules.toLocaleString();
         $('lib-stat-sessions').textContent = data.sessions.toLocaleString();
         $('lib-count-badge').textContent = data.terms + data.speakers + data.edit_patterns;
+        // Surface the Bootstrap CTA when the user has at most the seed
+        // pack — i.e. they haven't trained on their own transcripts yet.
+        // Threshold = 20 (seed pack ships 17 terms + 3 negatives) so this
+        // doesn't keep nagging users who already have a real library.
+        const ownContent = (data.terms + data.speakers + data.sessions) - 17;
+        if (ownContent <= 0 && typeof maybeShowBootstrapCTA === 'function') {
+          maybeShowBootstrapCTA();
+        }
       } catch (e) { console.error(e); }
     }
 
@@ -2314,6 +2634,10 @@
 
       // Settings (API keys)
       $('settings-btn').addEventListener('click', showSettingsModal);
+
+      // Bootstrap (library cold-start)
+      $('bootstrap-open').addEventListener('click', showBootstrapModal);
+      $('bootstrap-dismiss').addEventListener('click', dismissBootstrapCTA);
 
       // Editor
       $('transcript-input').addEventListener('input', () => { updateInputMeta(); scheduleCostPreview(); });

@@ -526,6 +526,192 @@ def projects_rerun(
                   f"tokens: in={result.input_tokens} out={result.output_tokens}[/dim]")
 
 
+@lib_app.command("bootstrap")
+def lib_bootstrap(
+    files: list[Path] = typer.Argument(
+        ...,
+        exists=True,
+        readable=True,
+        help="One or more transcript files (.txt / .md / .srt / .vtt / .json)",
+    ),
+    provider: str | None = typer.Option(
+        None, "--provider", "-p", help="Provider override"
+    ),
+    model: str | None = typer.Option(
+        None, "--model", "-m", help="Model override"
+    ),
+    auto_accept: bool = typer.Option(
+        False,
+        "--accept-all",
+        help="Skip the review prompt — accept every candidate into the library.",
+    ),
+    min_seen: int = typer.Option(
+        1,
+        "--min-seen",
+        help="Only accept candidates that appeared in at least N transcripts. "
+        "Useful with large batches — terms that only show up once may be noise.",
+    ),
+) -> None:
+    """Warm up your library by extracting terms from a batch of past transcripts.
+
+    Run this BEFORE you start cleaning new transcripts, especially on
+    first use. clearscript reads each file, asks the model to flag
+    proper-noun-looking ASR errors + recurring jargon, aggregates the
+    results across the whole batch, and lets you accept them in one
+    pass. Cheaper and faster than running full cleanup on each.
+
+    Example:
+        clearscript lib bootstrap interviews/*.docx --accept-all
+    """
+    from clearscript.core.bootstrap import bootstrap_from_transcripts
+    from clearscript.ingest.registry import parse as parse_any
+
+    cfg = load_config()
+    ensure_dirs(cfg)
+
+    try:
+        provider_cfg = cfg.get_provider(provider)
+    except KeyError as exc:
+        err_console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(2) from exc
+
+    chosen_model = model or provider_cfg.default_model
+    if not chosen_model:
+        err_console.print(
+            f"[red]No model resolved for {provider_cfg.name!r}. Pass --model.[/red]"
+        )
+        raise typer.Exit(2)
+
+    try:
+        llm = build_provider(provider_cfg)
+    except RuntimeError as exc:
+        err_console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(2) from exc
+
+    transcripts = []
+    for f in files:
+        try:
+            transcripts.append(parse_any(f))
+        except Exception as exc:
+            err_console.print(f"[yellow]Skipping {f}: {exc}[/yellow]")
+    if not transcripts:
+        err_console.print("[red]No parseable transcripts.[/red]")
+        raise typer.Exit(2)
+
+    console.print(
+        f"[bold]Bootstrapping library[/bold] from {len(transcripts)} transcript(s) "
+        f"using {provider_cfg.name} ({chosen_model})…\n"
+    )
+
+    candidates: list[dict] = []
+    errors: list[dict] = []
+    for event in bootstrap_from_transcripts(
+        provider=llm,
+        model=chosen_model,
+        transcripts=transcripts,
+    ):
+        if event.name == "transcript_start":
+            console.print(
+                f"[dim]  ↻ {event.data['index']}/{event.data['total']}…[/dim]"
+            )
+        elif event.name == "transcript_done":
+            console.print(
+                f"  [green]✓[/green] {event.data['index']}/{event.data['total']} "
+                f"({event.data['candidates_so_far']} candidates so far)"
+            )
+        elif event.name == "transcript_error":
+            console.print(
+                f"  [yellow]✗ #{event.data['index']}: {event.data['detail']}[/yellow]"
+            )
+        elif event.name == "complete":
+            candidates = event.data["candidates"]
+            errors = event.data.get("errors", [])
+            console.print(
+                f"\n[bold]Total tokens:[/bold] in={event.data['input_tokens']:,} "
+                f"out={event.data['output_tokens']:,}"
+            )
+
+    # Filter by min_seen.
+    filtered = [c for c in candidates if c["times_seen"] >= min_seen]
+    if not filtered:
+        console.print(
+            f"\n[dim]No candidates with times_seen >= {min_seen}. "
+            "Try --min-seen 1 or check the transcripts.[/dim]"
+        )
+        return
+
+    table = Table(title=f"{len(filtered)} candidate library entries", show_lines=False)
+    table.add_column("Kind")
+    table.add_column("Canonical", style="bold")
+    table.add_column("Aliases seen")
+    table.add_column("Seen in", justify="right")
+    table.add_column("Conf", justify="right")
+    for c in filtered[:50]:
+        aliases = ", ".join(c["aliases_seen"]) or "—"
+        table.add_row(
+            c["kind"],
+            c["canonical"],
+            aliases,
+            str(c["times_seen"]),
+            f"{c['confidence']:.2f}",
+        )
+    console.print(table)
+
+    if errors:
+        console.print(
+            f"\n[yellow]{len(errors)} transcript(s) failed extraction — "
+            "see --verbose for details.[/yellow]"
+        )
+
+    if not auto_accept and not typer.confirm(
+        f"\nAccept all {len(filtered)} into your library?", default=True
+    ):
+        console.print("[dim]Cancelled — nothing written.[/dim]")
+        return
+
+    # Persist via the same path the web UI uses (accept-suggestions).
+    library = Library(cfg.library_path)
+    accepted = {"terms": 0, "speakers": 0, "patterns": 0, "skipped": 0}
+    try:
+        for c in filtered:
+            s = c.get("as_suggestion") or {}
+            kind = (s.get("kind") or "").lower()
+            if kind == "term" and s.get("canonical"):
+                library.add_term(
+                    canonical=s["canonical"],
+                    type_=s.get("type"),
+                    domain=s.get("domain"),
+                    aliases=s.get("aliases_seen") or [],
+                )
+                accepted["terms"] += 1
+            elif kind == "speaker" and s.get("canonical_name"):
+                library.add_speaker(
+                    canonical_name=s["canonical_name"],
+                    display_label=s.get("display_label") or s["canonical_name"],
+                    aliases=s.get("aliases_seen") or [],
+                )
+                accepted["speakers"] += 1
+            elif kind == "jargon" and s.get("canonical"):
+                # Jargon goes into terms with type='jargon'.
+                library.add_term(
+                    canonical=s["canonical"],
+                    type_=s.get("type") or "jargon",
+                    domain=s.get("domain"),
+                    aliases=s.get("aliases_seen") or [],
+                )
+                accepted["terms"] += 1
+            else:
+                accepted["skipped"] += 1
+    finally:
+        library.close()
+
+    console.print(
+        f"\n[green]✓[/green] Accepted into library: "
+        f"{accepted['terms']} terms · {accepted['speakers']} speakers · "
+        f"{accepted['skipped']} skipped"
+    )
+
+
 @lib_app.command("negatives")
 def lib_negatives(
     add: str | None = typer.Option(

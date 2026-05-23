@@ -233,6 +233,19 @@ class RerunRequest(BaseModel):
     model: str | None = None
 
 
+class BootstrapRequest(BaseModel):
+    """Body for ``POST /api/library/bootstrap``.
+
+    ``transcripts`` is a list of raw transcript strings (txt format
+    assumed). Caller may also POST multipart files via ``/bootstrap-file``
+    for binary uploads.
+    """
+
+    transcripts: list[str]
+    provider: str | None = None
+    model: str | None = None
+
+
 class NegativePayload(BaseModel):
     """A negative-correction rule — 'do NOT change `text` to `do_not_change_to`'.
 
@@ -1091,6 +1104,63 @@ def create_app() -> FastAPI:
             return {"deleted": deleted}
         finally:
             lib.close()
+
+    # ============ Library: bootstrap (batch entity extraction) ============
+
+    @app.post("/api/library/bootstrap")
+    def library_bootstrap(req: BootstrapRequest) -> StreamingResponse:
+        """Run a lightweight entity-extraction pass over many raw
+        transcripts and stream aggregated candidates back.
+
+        Closes the cold-start gap: instead of cleaning transcripts one
+        at a time and slowly compounding the library, the user dumps a
+        stack of past transcripts here, accepts the merged candidates
+        in one click, and starts cleaning with a warm library.
+
+        Cheaper than ``/api/run`` — pure extraction, no rewriting, no
+        chunking. Each transcript is one round-trip to the model.
+        """
+        from clearscript.core.bootstrap import bootstrap_from_transcripts
+
+        texts = [t for t in (req.transcripts or []) if t and t.strip()]
+        if not texts:
+            raise HTTPException(400, "transcripts list is empty")
+        if len(texts) > 50:
+            raise HTTPException(
+                400,
+                f"too many transcripts ({len(texts)}); cap is 50 per bootstrap "
+                "batch. Run multiple bootstrap rounds if you have more.",
+            )
+
+        llm, chosen_model = _resolve_pipeline_pieces(req.provider, req.model)
+
+        parsed: list = []
+        for raw in texts:
+            try:
+                parsed.append(TxtAdapter().parse_string(raw))
+            except ValueError as exc:
+                raise HTTPException(400, f"Failed to parse transcript: {exc}") from exc
+
+        def event_stream():
+            try:
+                for event in bootstrap_from_transcripts(
+                    provider=llm,
+                    model=chosen_model,
+                    transcripts=parsed,
+                ):
+                    yield _sse_format(event.name, event.data)
+            except Exception as exc:
+                yield _sse_format("error", {"detail": f"bootstrap error: {exc}"})
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "Connection": "keep-alive",
+            },
+        )
 
     # ============ Library: export / import ============
 
