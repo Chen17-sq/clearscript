@@ -123,6 +123,7 @@
           <span class="text-sm">loading providers…</span>
         </div>
         <button id="settings-btn" class="bauhaus-press border-2 border-ink bg-white text-ink px-3 py-1 text-[11px] font-bold uppercase tracking-widest shadow-bauhaus-sm hover:opacity-80" title="Set API keys, manage providers">⚙ Keys</button>
+        <button id="train-btn" class="bauhaus-press border-2 border-ink bg-red text-white px-3 py-1 text-[11px] font-bold uppercase tracking-widest shadow-bauhaus-sm hover:opacity-90" title="Drop a stack of past transcripts to extract terms/speakers into your library">🚀 Train library</button>
         <div class="ml-auto flex items-center gap-3">
           <label for="model-input" class="font-black uppercase tracking-widest text-xs">Model</label>
           <input id="model-input"
@@ -742,8 +743,15 @@
 
     // ============ Bootstrap (library cold-start) ============
     function maybeShowBootstrapCTA() {
-      // Called by loadLibStats after every change. Only show if the user
-      // hasn't dismissed in this session and we're on the editor tab.
+      // Called by loadLibStats after every library change. The CTA is
+      // the big yellow first-run card; show iff the user has never
+      // dismissed it and there's plausible cold-start state (small
+      // library beyond the seed pack). The "🚀 Train library" button
+      // in the provider strip is ALWAYS visible — this CTA is just an
+      // extra nudge for fresh users.
+      if (localStorage.getItem('clearscript-bootstrap-dismissed') === '1') {
+        return;
+      }
       if (state.bootstrapDismissed) return;
       const cta = document.getElementById('bootstrap-cta');
       if (cta) cta.classList.remove('hidden');
@@ -751,6 +759,7 @@
 
     function dismissBootstrapCTA() {
       state.bootstrapDismissed = true;
+      localStorage.setItem('clearscript-bootstrap-dismissed', '1');
       const cta = document.getElementById('bootstrap-cta');
       if (cta) cta.classList.add('hidden');
     }
@@ -1901,12 +1910,15 @@
         $('lib-stat-negatives').textContent = data.negative_rules.toLocaleString();
         $('lib-stat-sessions').textContent = data.sessions.toLocaleString();
         $('lib-count-badge').textContent = data.terms + data.speakers + data.edit_patterns;
-        // Surface the Bootstrap CTA when the user has at most the seed
-        // pack — i.e. they haven't trained on their own transcripts yet.
-        // Threshold = 20 (seed pack ships 17 terms + 3 negatives) so this
-        // doesn't keep nagging users who already have a real library.
-        const ownContent = (data.terms + data.speakers + data.sessions) - 17;
-        if (ownContent <= 0 && typeof maybeShowBootstrapCTA === 'function') {
+        // Surface the Bootstrap CTA when the library still looks "cold"
+        // — fewer than 10 of the user's own terms beyond the 17-term
+        // seed pack and fewer than 3 speakers. Above that, the user has
+        // clearly trained the library somehow and the giant yellow card
+        // is just noise (the always-visible "🚀 Train library" button in
+        // the provider strip stays available regardless).
+        const ownTerms = Math.max(0, data.terms - 17);
+        const isCold = ownTerms < 10 && data.speakers < 3;
+        if (isCold && typeof maybeShowBootstrapCTA === 'function') {
           maybeShowBootstrapCTA();
         }
       } catch (e) { console.error(e); }
@@ -2638,6 +2650,7 @@
       // Bootstrap (library cold-start)
       $('bootstrap-open').addEventListener('click', showBootstrapModal);
       $('bootstrap-dismiss').addEventListener('click', dismissBootstrapCTA);
+      $('train-btn').addEventListener('click', showBootstrapModal);
 
       // Editor
       $('transcript-input').addEventListener('input', () => { updateInputMeta(); scheduleCostPreview(); });
