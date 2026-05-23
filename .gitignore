@@ -101,3 +101,11 @@ PyInstaller/
 pyinstaller-build/
 release/
 dist/
+
+# External tool skill installs — not part of clearscript
+.agents/
+.claude/skills/
+.cursor/
+.gemini/
+.github/copilot/
+.expect/
