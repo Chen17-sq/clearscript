@@ -47,12 +47,14 @@ class ProviderConfig:
           1. ``api_key`` set inline (config TOML)
           2. The OS keyring under service ``clearscript`` + this provider's
              name — populated by ``POST /api/providers/{name}/api-key``
-             from the web UI or ``clearscript providers set-key``
+             from the web UI or ``clearscript set-key``
           3. The env var named by ``api_key_env`` (``ANTHROPIC_API_KEY``, etc.)
 
-        Returns ``None`` if no source has a key.
+        Returns ``None`` if no source has a key. Treats empty strings as
+        "no key" so a bare ``export ANTHROPIC_API_KEY=`` in someone's
+        shell config doesn't masquerade as a set credential.
         """
-        if self.api_key:
+        if self.api_key and self.api_key.strip():
             return self.api_key
         # Try keyring before env var so an explicit in-app entry wins.
         # Wrap in try/except because keyring backends can fail on
@@ -61,12 +63,14 @@ class ProviderConfig:
             import keyring
 
             stored = keyring.get_password("clearscript", self.name)
-            if stored:
+            if stored and stored.strip():
                 return stored
         except Exception:
             pass
         if self.api_key_env:
-            return os.environ.get(self.api_key_env)
+            env_val = os.environ.get(self.api_key_env)
+            if env_val and env_val.strip():
+                return env_val
         return None
 
 
