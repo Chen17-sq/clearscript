@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.16] - 2026-05-23
+
+### Fixed — In-app API key input
+
+Real user feedback from /goal session: **"没地方输入 api key"** — there was
+no in-app way to set an API key. The user had to know what an env var
+is, edit ``~/.zshrc`` or ``~/.bashrc``, source it, restart the server.
+That's three blocking steps for a non-technical user before they can
+clean a single transcript.
+
+v0.0.16 makes this a one-click operation:
+
+- **Web UI**: A new ``⚙ Keys`` button next to the provider strip
+  opens a modal listing every provider with its current key source
+  (``ENV`` / ``KEYRING`` / ``CONFIG`` / ``NONE``), a paste field, and
+  a "get a key →" link to the right vendor console. Save persists to
+  the OS keyring; the providers list refreshes automatically so the
+  pill becomes selectable instantly. Clicking a disabled pill also
+  opens the modal — there's no way to be stuck.
+- **CLI**: ``clearscript set-key <provider>`` prompts for the key
+  with hidden input (so it doesn't end up in shell history) and
+  saves it to the keyring. ``--delete`` removes a stored key.
+- **Storage**: OS keyring via the ``keyring`` package (was already a
+  dep — just unused). macOS Keychain / Windows Credential Manager /
+  Linux Secret Service. Stored under service ``clearscript`` +
+  the provider name. Survives reboots, never touches disk via
+  clearscript code.
+- **Resolution order** in ``ProviderConfig.resolve_api_key()``:
+  inline ``api_key`` in TOML > keyring > env var. So an explicit
+  in-app set always wins.
+- **Pill UI** now shows a small chip on each provider — ``KEY``
+  (yellow, from keyring), ``ENV`` (white, from env var), or ``CFG``
+  (blue, from config TOML) — so you can see at a glance which keys
+  are wired up where.
+
+The change is fully backward-compatible: users who'd set
+``ANTHROPIC_API_KEY`` etc. in their shell still see those work
+(env vars still resolve, just at lower priority than keyring).
+
+### Tests
+
+248 → **256**. All passing. Ruff clean.
+
+- ``test_server.py``: +5 (set + delete keyring endpoints, empty-key
+  rejection, unknown-provider 404, /providers exposes key_source)
+- ``test_cli.py``: +3 (set-key happy path, unknown provider, --delete)
+
+The keyring is mocked with a fake module injected into ``sys.modules``
+— tests don't touch the system keychain.
+
 ## [0.0.15] - 2026-05-23
 
 ### Fixed — CI green on Windows

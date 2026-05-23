@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import tempfile
 import threading
 import time
@@ -294,6 +295,27 @@ def create_app() -> FastAPI:
     def health() -> dict:
         return {"status": "ok", "version": __version__}
 
+    def _key_source(p) -> str | None:  # type: ignore[no-untyped-def]
+        """Return where a provider's API key came from, for UI display.
+
+        Values: 'inline' (api_key in TOML), 'keyring' (set via web UI),
+        'env' (env var), or None if no key found. Ollama needs no key.
+        """
+        if p.type == "ollama":
+            return "none-needed"
+        if p.api_key:
+            return "inline"
+        try:
+            import keyring
+
+            if keyring.get_password("clearscript", p.name):
+                return "keyring"
+        except Exception:
+            pass
+        if p.api_key_env and os.environ.get(p.api_key_env):
+            return "env"
+        return None
+
     @app.get("/api/providers")
     def list_providers() -> dict:
         c = cfg()
@@ -307,10 +329,57 @@ def create_app() -> FastAPI:
                     "models": p.models,
                     "has_key": (p.resolve_api_key() is not None) or p.type == "ollama",
                     "key_env": p.api_key_env,
+                    "key_source": _key_source(p),
                 }
                 for p in c.providers.values()
             ],
         }
+
+    @app.post("/api/providers/{name}/api-key", status_code=201)
+    def set_provider_api_key(name: str, payload: dict) -> dict:
+        """Persist an API key for a provider into the OS keyring.
+
+        Body: ``{"api_key": "sk-ant-..."}``. The key is stored under
+        service ``clearscript`` + the provider's name, so it survives
+        server restarts but is never written to disk by clearscript
+        (the keyring backend handles that).
+
+        Returns ``{ok: true, source: "keyring"}`` so the UI can show
+        "saved to keyring" feedback. If the keyring backend fails (e.g.
+        on a headless Linux box with no DBus), returns 500 with a
+        descriptive message — the user can fall back to env var.
+        """
+        c = cfg()
+        if name not in c.providers:
+            raise HTTPException(404, f"Unknown provider {name!r}")
+        key = (payload or {}).get("api_key", "").strip()
+        if not key:
+            raise HTTPException(400, "Missing api_key in body")
+        try:
+            import keyring
+
+            keyring.set_password("clearscript", name, key)
+        except Exception as exc:
+            raise HTTPException(
+                500,
+                f"Failed to save to keyring: {exc}. Fall back to env var "
+                f"({c.providers[name].api_key_env or 'see README'}).",
+            ) from exc
+        return {"ok": True, "source": "keyring"}
+
+    @app.delete("/api/providers/{name}/api-key", status_code=204)
+    def delete_provider_api_key(name: str) -> Response:
+        c = cfg()
+        if name not in c.providers:
+            raise HTTPException(404, f"Unknown provider {name!r}")
+        try:
+            import keyring
+
+            with contextlib.suppress(keyring.errors.PasswordDeleteError):
+                keyring.delete_password("clearscript", name)
+        except Exception as exc:
+            raise HTTPException(500, f"Failed to delete from keyring: {exc}") from exc
+        return Response(status_code=204)
 
     def _resolve_pipeline_pieces(
         provider_name: str | None, model_name: str | None

@@ -41,8 +41,30 @@ class ProviderConfig:
     extra: dict[str, Any] = field(default_factory=dict)
 
     def resolve_api_key(self) -> str | None:
+        """Look up an API key for this provider.
+
+        Resolution order (highest priority first):
+          1. ``api_key`` set inline (config TOML)
+          2. The OS keyring under service ``clearscript`` + this provider's
+             name — populated by ``POST /api/providers/{name}/api-key``
+             from the web UI or ``clearscript providers set-key``
+          3. The env var named by ``api_key_env`` (``ANTHROPIC_API_KEY``, etc.)
+
+        Returns ``None`` if no source has a key.
+        """
         if self.api_key:
             return self.api_key
+        # Try keyring before env var so an explicit in-app entry wins.
+        # Wrap in try/except because keyring backends can fail on
+        # headless CI runners and we never want that to break resolution.
+        try:
+            import keyring
+
+            stored = keyring.get_password("clearscript", self.name)
+            if stored:
+                return stored
+        except Exception:
+            pass
         if self.api_key_env:
             return os.environ.get(self.api_key_env)
         return None

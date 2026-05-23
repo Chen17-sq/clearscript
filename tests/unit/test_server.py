@@ -139,6 +139,108 @@ def test_health(app_client) -> None:
     assert "version" in body
 
 
+def test_set_provider_api_key_writes_to_keyring(app_client, monkeypatch) -> None:
+    """POST /api/providers/{name}/api-key writes to the OS keyring.
+
+    We mock the keyring module so tests don't poke the real system
+    keychain — just verify our endpoint calls set_password with the
+    right args.
+    """
+    client, _ = app_client
+    saved: dict = {}
+
+    class FakeKeyring:
+        @staticmethod
+        def set_password(service, account, password):  # type: ignore[no-untyped-def]
+            saved[(service, account)] = password
+
+        @staticmethod
+        def get_password(service, account):  # type: ignore[no-untyped-def]
+            return saved.get((service, account))
+
+        @staticmethod
+        def delete_password(service, account):  # type: ignore[no-untyped-def]
+            saved.pop((service, account), None)
+
+    import sys
+
+    monkeypatch.setitem(sys.modules, "keyring", FakeKeyring)
+
+    res = client.post(
+        "/api/providers/claude/api-key",
+        json={"api_key": "sk-ant-test-key-123"},
+    )
+    assert res.status_code == 201
+    assert res.json()["source"] == "keyring"
+    assert saved[("clearscript", "claude")] == "sk-ant-test-key-123"
+
+
+def test_set_provider_api_key_rejects_empty(app_client) -> None:
+    client, _ = app_client
+    res = client.post("/api/providers/claude/api-key", json={"api_key": "   "})
+    assert res.status_code == 400
+
+
+def test_set_provider_api_key_404_for_unknown_provider(app_client) -> None:
+    client, _ = app_client
+    res = client.post(
+        "/api/providers/imaginary-provider/api-key",
+        json={"api_key": "sk-..."},
+    )
+    assert res.status_code == 404
+
+
+def test_delete_provider_api_key_clears_keyring(app_client, monkeypatch) -> None:
+    client, _ = app_client
+    store: dict = {("clearscript", "openai"): "sk-old"}
+
+    class FakeKeyring:
+        @staticmethod
+        def set_password(service, account, password):  # type: ignore[no-untyped-def]
+            store[(service, account)] = password
+
+        @staticmethod
+        def get_password(service, account):  # type: ignore[no-untyped-def]
+            return store.get((service, account))
+
+        @staticmethod
+        def delete_password(service, account):  # type: ignore[no-untyped-def]
+            if (service, account) not in store:
+                # Simulate the real keyring's behavior.
+                raise FakeErrors.PasswordDeleteError("not found")
+            del store[(service, account)]
+
+    # Real keyring has a nested errors module — simulate just enough to satisfy
+    # the server's try/except.
+    class FakeErrors:
+        class PasswordDeleteError(Exception):
+            pass
+
+    FakeKeyring.errors = FakeErrors  # type: ignore[attr-defined]
+
+    import sys
+
+    monkeypatch.setitem(sys.modules, "keyring", FakeKeyring)
+
+    res = client.delete("/api/providers/openai/api-key")
+    assert res.status_code == 204
+    assert ("clearscript", "openai") not in store
+
+
+def test_provider_listing_exposes_key_source(app_client, monkeypatch) -> None:
+    """/api/providers must report 'env' / 'keyring' / 'inline' / None so the
+    UI can show where each key came from.
+    """
+    client, _ = app_client
+    # ANTHROPIC_API_KEY in env should surface as key_source='env' for claude.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake-test")
+    res = client.get("/api/providers")
+    assert res.status_code == 200
+    claude = next(p for p in res.json()["providers"] if p["name"] == "claude")
+    assert claude["has_key"]
+    assert claude["key_source"] in ("env", "keyring", "inline")
+
+
 def test_providers_lists_builtins(app_client) -> None:
     client, _ = app_client
     res = client.get("/api/providers")

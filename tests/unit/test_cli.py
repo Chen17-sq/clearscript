@@ -335,6 +335,78 @@ def test_lib_export_markdown_flag(cli_env, tmp_path) -> None:
     assert "MarkdownTerm" in md
 
 
+def test_set_key_command_saves_to_keyring(cli_env, monkeypatch) -> None:
+    """`clearscript set-key <provider> <key>` calls keyring.set_password."""
+    saved: dict = {}
+
+    class FakeKeyring:
+        @staticmethod
+        def set_password(service, account, password):  # type: ignore[no-untyped-def]
+            saved[(service, account)] = password
+
+        @staticmethod
+        def get_password(service, account):  # type: ignore[no-untyped-def]
+            return saved.get((service, account))
+
+        @staticmethod
+        def delete_password(service, account):  # type: ignore[no-untyped-def]
+            saved.pop((service, account), None)
+
+    class FakeErrors:
+        class PasswordDeleteError(Exception):
+            pass
+
+    FakeKeyring.errors = FakeErrors  # type: ignore[attr-defined]
+
+    import sys
+
+    monkeypatch.setitem(sys.modules, "keyring", FakeKeyring)
+
+    result = runner.invoke(app, ["set-key", "deepseek", "sk-test-12345"])
+    assert result.exit_code == 0, result.stdout
+    assert "saved" in result.stdout.lower()
+    assert saved[("clearscript", "deepseek")] == "sk-test-12345"
+
+
+def test_set_key_unknown_provider(cli_env) -> None:
+    result = runner.invoke(app, ["set-key", "not-a-real-provider", "key"])
+    assert result.exit_code == 2
+
+
+def test_set_key_delete_removes(cli_env, monkeypatch) -> None:
+    saved: dict = {("clearscript", "openai"): "sk-old"}
+
+    class FakeKeyring:
+        @staticmethod
+        def set_password(s, a, p):  # type: ignore[no-untyped-def]
+            saved[(s, a)] = p
+
+        @staticmethod
+        def get_password(s, a):  # type: ignore[no-untyped-def]
+            return saved.get((s, a))
+
+        @staticmethod
+        def delete_password(s, a):  # type: ignore[no-untyped-def]
+            if (s, a) in saved:
+                del saved[(s, a)]
+            else:
+                raise FakeKeyring.errors.PasswordDeleteError("not found")
+
+    class FakeErrors:
+        class PasswordDeleteError(Exception):
+            pass
+
+    FakeKeyring.errors = FakeErrors  # type: ignore[attr-defined]
+
+    import sys
+
+    monkeypatch.setitem(sys.modules, "keyring", FakeKeyring)
+
+    result = runner.invoke(app, ["set-key", "openai", "--delete"])
+    assert result.exit_code == 0
+    assert ("clearscript", "openai") not in saved
+
+
 def test_lib_lookup_command(cli_env) -> None:
     """`clearscript lib lookup <alias>` finds seeded terms."""
     # Force-install seed pack first by opening server which auto-seeds.

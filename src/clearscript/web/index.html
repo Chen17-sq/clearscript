@@ -122,6 +122,7 @@
         <div id="provider-pills" class="flex flex-wrap gap-2">
           <span class="text-sm">loading providers…</span>
         </div>
+        <button id="settings-btn" class="bauhaus-press border-2 border-ink bg-white text-ink px-3 py-1 text-[11px] font-bold uppercase tracking-widest shadow-bauhaus-sm hover:opacity-80" title="Set API keys, manage providers">⚙ Keys</button>
         <div class="ml-auto flex items-center gap-3">
           <label for="model-input" class="font-black uppercase tracking-widest text-xs">Model</label>
           <input id="model-input"
@@ -680,12 +681,23 @@
       wrap.type = 'button';
       const baseClasses = 'bauhaus-press border-2 border-ink px-4 py-2 text-xs font-bold uppercase tracking-widest shadow-bauhaus-sm transition-all';
       if (isSelected) wrap.className = `${baseClasses} bg-ink text-white`;
-      else if (!p.has_key) wrap.className = `${baseClasses} bg-white text-ink/40 cursor-not-allowed`;
+      else if (!p.has_key) wrap.className = `${baseClasses} bg-white text-ink/40 hover:bg-yellow/30`;
       else wrap.className = `${baseClasses} bg-white text-ink hover:bg-yellow`;
       const dotColor = { anthropic: 'bg-red', openai: 'bg-blue', 'openai-compat': 'bg-blue', google: 'bg-yellow', ollama: 'bg-white border border-ink' }[p.type] || 'bg-ink';
-      wrap.innerHTML = `<span class="inline-block w-2 h-2 ${dotColor} mr-2 align-middle"></span>${p.name}${p.has_key ? '' : ' ✗'}`;
-      wrap.title = p.has_key ? `${p.type} · default: ${p.default_model || '(set in --model)'}` : `Set ${p.key_env} env var to enable`;
+      // Show the source ribbon ("env" / "key") so the user knows what's wired up.
+      const srcChip = ({
+        keyring: '<span class="ml-1 text-[8px] bg-yellow text-ink px-1 py-0.5 align-middle">KEY</span>',
+        env: '<span class="ml-1 text-[8px] bg-white border border-ink px-1 py-0.5 align-middle">ENV</span>',
+        inline: '<span class="ml-1 text-[8px] bg-blue text-white px-1 py-0.5 align-middle">CFG</span>',
+      })[p.key_source] || '';
+      const missingTag = p.has_key ? srcChip : ' <span class="text-[10px] underline">add key</span>';
+      wrap.innerHTML = `<span class="inline-block w-2 h-2 ${dotColor} mr-2 align-middle"></span>${p.name}${missingTag}`;
+      wrap.title = p.has_key
+        ? `${p.type} · default: ${p.default_model || '(set in --model)'}`
+        : `Click to paste an API key (or set env var ${p.key_env || '?'} and restart)`;
+      // Clicking a keyless pill opens the settings modal so the user can fix it in 5 seconds.
       if (p.has_key) wrap.addEventListener('click', () => selectProvider(p.name));
+      else wrap.addEventListener('click', () => showSettingsModal());
       return wrap;
     }
     function selectProvider(name) {
@@ -708,6 +720,159 @@
         renderPills();
         if (!haveKey) showFirstRunHelp();
       } catch (e) { setStatus('Failed to load providers: ' + e.message, 'error'); }
+    }
+
+    function showSettingsModal() {
+      // The in-app API key panel. Each row: provider name + current key
+      // source ("env" / "keyring" / "—") + a password input + Save/Clear
+      // buttons. Saves go to the OS keyring via POST /api/providers/{name}/api-key.
+      const existing = document.getElementById('cs-settings-modal');
+      if (existing) existing.remove();
+      const providers = state.providers || [];
+      const rows = providers.map((p) => {
+        if (p.type === 'ollama') {
+          return `
+            <tr>
+              <td class="border-2 border-ink px-3 py-2 font-bold">${escapeHtml(p.name)}</td>
+              <td class="border-2 border-ink px-3 py-2 text-xs">local — no API key needed</td>
+              <td class="border-2 border-ink px-3 py-2" colspan="2"><span class="text-ink/50">—</span></td>
+            </tr>`;
+        }
+        const sourceLabel = ({
+          inline: '<span class="bg-blue text-white px-1.5 py-0.5 text-[9px]">CONFIG</span>',
+          keyring: '<span class="bg-yellow text-ink px-1.5 py-0.5 text-[9px]">KEYRING</span>',
+          env: `<span class="bg-white border-2 border-ink px-1.5 py-0.5 text-[9px]">ENV ${escapeHtml(p.key_env || '')}</span>`,
+          null: '<span class="bg-red text-white px-1.5 py-0.5 text-[9px]">NONE</span>',
+        })[p.key_source] || '<span class="bg-red text-white px-1.5 py-0.5 text-[9px]">NONE</span>';
+        const linkMap = {
+          claude: 'https://console.anthropic.com/account/keys',
+          openai: 'https://platform.openai.com/api-keys',
+          deepseek: 'https://platform.deepseek.com/api_keys',
+          gemini: 'https://aistudio.google.com/apikey',
+        };
+        const docLink = linkMap[p.name]
+          ? `<a href="${linkMap[p.name]}" target="_blank" class="text-blue underline text-[10px]">get a key →</a>`
+          : '';
+        return `
+          <tr data-provider="${escapeHtml(p.name)}">
+            <td class="border-2 border-ink px-3 py-2 font-bold align-top">
+              <div>${escapeHtml(p.name)}</div>
+              <div class="text-[10px] text-ink/60 mt-1">${escapeHtml(p.type)}</div>
+              <div class="mt-1">${docLink}</div>
+            </td>
+            <td class="border-2 border-ink px-3 py-2 align-top text-xs">${sourceLabel}</td>
+            <td class="border-2 border-ink px-3 py-2 align-top">
+              <input type="password" class="cs-key-input border-2 border-ink px-2 py-1 text-xs font-mono w-64 bg-white" placeholder="paste API key…" autocomplete="off" />
+            </td>
+            <td class="border-2 border-ink px-3 py-2 align-top whitespace-nowrap">
+              <button class="cs-key-save bauhaus-press border-2 border-ink bg-yellow text-ink px-2 py-1 text-[10px] font-bold uppercase tracking-widest">Save</button>
+              ${p.key_source === 'keyring' ? `<button class="cs-key-clear ml-1 bauhaus-press border-2 border-ink bg-white text-ink px-2 py-1 text-[10px] font-bold uppercase tracking-widest hover:bg-red hover:text-white">Clear</button>` : ''}
+            </td>
+          </tr>`;
+      }).join('');
+
+      const modal = document.createElement('div');
+      modal.id = 'cs-settings-modal';
+      modal.className = 'fixed inset-0 z-50 bg-ink/60 flex items-center justify-center p-6';
+      modal.innerHTML = `
+        <div class="bg-white border-4 border-ink shadow-bauhaus-lg max-w-4xl w-full max-h-[85vh] flex flex-col">
+          <header class="border-b-4 border-ink bg-blue text-white px-5 py-3 flex items-center gap-3">
+            <h3 class="font-black uppercase tracking-widest text-sm">API keys</h3>
+            <span class="text-[11px] opacity-80">stored in your OS keyring — never written to disk</span>
+            <button id="cs-settings-close" class="ml-auto border-2 border-bg bg-white text-ink px-2 py-1 text-[11px] font-bold uppercase">Close</button>
+          </header>
+          <div class="p-4 overflow-auto">
+            <p class="text-xs text-ink/70 mb-3">
+              Set a key for any provider you want to use. Priority order: TOML config &gt; keyring &gt; env var.
+              You only need one key — the rest stay disabled until you set them.
+            </p>
+            <table class="w-full border-collapse">
+              <thead>
+                <tr class="text-[10px] uppercase tracking-widest">
+                  <th class="border-2 border-ink px-3 py-2 text-left bg-ink text-white">Provider</th>
+                  <th class="border-2 border-ink px-3 py-2 text-left bg-ink text-white">Current source</th>
+                  <th class="border-2 border-ink px-3 py-2 text-left bg-ink text-white">New key</th>
+                  <th class="border-2 border-ink px-3 py-2 text-left bg-ink text-white">Action</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+            <p id="cs-settings-status" class="mt-3 text-xs"></p>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(modal);
+
+      const close = () => modal.remove();
+      document.getElementById('cs-settings-close').addEventListener('click', close);
+      modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+
+      const status = document.getElementById('cs-settings-status');
+      modal.addEventListener('click', async (e) => {
+        const tr = e.target.closest('tr[data-provider]');
+        if (!tr) return;
+        const provider = tr.dataset.provider;
+        if (e.target.classList.contains('cs-key-save')) {
+          const input = tr.querySelector('.cs-key-input');
+          const key = (input.value || '').trim();
+          if (!key) { status.textContent = '✗ Empty key.'; status.className = 'mt-3 text-xs text-red'; return; }
+          status.textContent = `Saving ${provider}…`;
+          status.className = 'mt-3 text-xs text-ink/60';
+          try {
+            const res = await fetch(
+              `/api/providers/${encodeURIComponent(provider)}/api-key`,
+              { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ api_key: key }) },
+            );
+            if (!res.ok) {
+              const err = await res.json().catch(() => ({}));
+              status.textContent = '✗ ' + (err.detail || res.statusText);
+              status.className = 'mt-3 text-xs text-red';
+              return;
+            }
+            status.textContent = `✓ Saved key for ${provider} to OS keyring.`;
+            status.className = 'mt-3 text-xs text-green-700 font-bold';
+            input.value = '';
+            // Refresh providers list + UI pills.
+            await loadProviders();
+            // Re-render the modal with fresh state so the Clear button appears.
+            close();
+            showSettingsModal();
+          } catch (err) {
+            status.textContent = '✗ Network error: ' + err.message;
+            status.className = 'mt-3 text-xs text-red';
+          }
+        } else if (e.target.classList.contains('cs-key-clear')) {
+          if (!confirm(`Remove the stored key for ${provider}?`)) return;
+          try {
+            const res = await fetch(
+              `/api/providers/${encodeURIComponent(provider)}/api-key`,
+              { method: 'DELETE' },
+            );
+            if (!res.ok && res.status !== 204) {
+              status.textContent = '✗ Delete failed: ' + res.statusText;
+              status.className = 'mt-3 text-xs text-red';
+              return;
+            }
+            status.textContent = `✓ Removed key for ${provider}.`;
+            status.className = 'mt-3 text-xs text-ink/60';
+            await loadProviders();
+            close();
+            showSettingsModal();
+          } catch (err) {
+            status.textContent = '✗ Network error: ' + err.message;
+            status.className = 'mt-3 text-xs text-red';
+          }
+        }
+      });
+
+      // Enter to save on the focused input
+      modal.querySelectorAll('.cs-key-input').forEach((input) => {
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            input.closest('tr').querySelector('.cs-key-save').click();
+          }
+        });
+      });
     }
 
     function showFirstRunHelp() {
@@ -746,11 +911,14 @@
           <span class="text-2xl">⚠</span>
           <div class="flex-1">
             <div class="font-black uppercase tracking-widest text-sm mb-2">Set an API key to start cleaning transcripts</div>
-            <div class="text-xs mb-3">Any one of the keys below works. Set it in your shell, then restart <code class="bg-white px-1">clearscript serve</code>.</div>
+            <div class="text-xs mb-3">
+              <button id="first-run-open-settings" class="bauhaus-press border-2 border-ink bg-red text-white px-3 py-1 text-[11px] font-bold uppercase tracking-widest shadow-bauhaus-sm hover:opacity-90 mr-2">⚙ Paste your API key here</button>
+              <span>— or set an env var below and restart <code class="bg-white px-1">clearscript serve</code>.</span>
+            </div>
             <table class="w-full border-collapse">${rows}</table>
             <div class="text-[11px] mt-3 text-ink/70">
-              Tip: keys stay on your machine — clearscript never phones home.
-              For a permanent setup, add the export line to your <code class="bg-white px-1">~/.zshrc</code> or <code class="bg-white px-1">~/.bashrc</code>.
+              Tip: the in-app input stores keys in your OS keyring (macOS Keychain / Windows Credential Manager / Linux Secret Service).
+              Keys never touch disk via clearscript; they stay on your machine.
             </div>
             <button id="first-run-dismiss" class="mt-3 bauhaus-press border-2 border-ink bg-white text-ink px-3 py-1 text-[11px] font-bold uppercase tracking-widest shadow-bauhaus-sm hover:opacity-80">Dismiss</button>
           </div>
@@ -762,6 +930,10 @@
       document.getElementById('first-run-dismiss').addEventListener(
         'click',
         () => help.remove(),
+      );
+      document.getElementById('first-run-open-settings').addEventListener(
+        'click',
+        () => showSettingsModal(),
       );
     }
 
@@ -2139,6 +2311,9 @@
 
       $$('.tab-btn').forEach((b) => b.addEventListener('click', () => setTab(b.dataset.tab)));
       $$('.lib-subtab').forEach((b) => b.addEventListener('click', () => setSubtab(b.dataset.subtab)));
+
+      // Settings (API keys)
+      $('settings-btn').addEventListener('click', showSettingsModal);
 
       // Editor
       $('transcript-input').addEventListener('input', () => { updateInputMeta(); scheduleCostPreview(); });

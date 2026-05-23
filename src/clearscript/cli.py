@@ -91,6 +91,68 @@ def providers() -> None:
     console.print(f"Default provider: [bold]{cfg.default_provider}[/bold]")
 
 
+@app.command("set-key")
+def set_key(
+    provider: str = typer.Argument(..., help="Provider name (claude / openai / deepseek / gemini)"),
+    api_key: str | None = typer.Argument(
+        None,
+        help="API key (omit to be prompted securely so the key isn't in shell history)",
+    ),
+    delete: bool = typer.Option(False, "--delete", help="Remove the stored key instead"),
+) -> None:
+    """Store a provider's API key in your OS keyring.
+
+    Cross-platform: macOS Keychain, Windows Credential Manager, Linux
+    Secret Service. The key survives reboots and is never written to
+    disk by clearscript. Removes the need to ``export SOMETHING_API_KEY``
+    in your shell config.
+
+    Examples:
+        clearscript set-key claude              # prompts for key
+        clearscript set-key deepseek sk-...     # inline (avoid in shared terminals)
+        clearscript set-key claude --delete     # remove stored key
+    """
+    cfg = load_config()
+    if provider not in cfg.providers:
+        err_console.print(
+            f"[red]Unknown provider {provider!r}. Available: {list(cfg.providers.keys())}[/red]"
+        )
+        raise typer.Exit(2)
+    try:
+        import keyring
+    except ImportError as exc:
+        err_console.print(
+            "[red]keyring package not available. "
+            "Install with: uv pip install keyring[/red]"
+        )
+        raise typer.Exit(2) from exc
+
+    if delete:
+        try:
+            keyring.delete_password("clearscript", provider)
+            console.print(f"[green]✓[/green] deleted stored key for {provider}")
+        except keyring.errors.PasswordDeleteError:
+            console.print(f"[dim]No stored key for {provider} (already gone)[/dim]")
+        return
+
+    if not api_key:
+        api_key = typer.prompt(f"API key for {provider}", hide_input=True)
+    api_key = (api_key or "").strip()
+    if not api_key:
+        err_console.print("[red]Empty key — aborting[/red]")
+        raise typer.Exit(2)
+
+    try:
+        keyring.set_password("clearscript", provider, api_key)
+    except Exception as exc:
+        err_console.print(f"[red]Failed to save to keyring: {exc}[/red]")
+        raise typer.Exit(2) from exc
+    console.print(
+        f"[green]✓[/green] saved key for {provider} to keyring "
+        f"(service=clearscript, account={provider})"
+    )
+
+
 @app.command()
 def run(
     input_path: Path = typer.Argument(
