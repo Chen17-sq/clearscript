@@ -106,7 +106,7 @@ def loop_client(tmp_path, monkeypatch):
     )
 
     provider = CapturingProvider()
-    monkeypatch.setattr("clearscript.server.build_provider", lambda _c: provider)
+    monkeypatch.setattr("clearscript.api.deps.build_provider", lambda _c: provider)
 
     from clearscript.server import create_app
 

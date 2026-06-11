@@ -272,7 +272,7 @@ wheels = [
 
 [[package]]
 name = "clearscript"
-version = "0.0.19"
+version = "0.0.21"
 source = { editable = "." }
 dependencies = [
     { name = "anthropic" },

@@ -116,7 +116,7 @@ def app_client(tmp_path, monkeypatch):
     )
 
     stub = StubProvider()
-    monkeypatch.setattr("clearscript.server.build_provider", lambda _cfg: stub)
+    monkeypatch.setattr("clearscript.api.deps.build_provider", lambda _cfg: stub)
 
     # create_app must be imported AFTER monkeypatch is applied so the
     # patched build_provider is captured in the closure.
@@ -302,12 +302,12 @@ def test_run_happy_path(app_client) -> None:
     assert body["model"]
     assert body["provider"] == "stub"
     assert body["project_slug"]  # saved to disk
-    # Token counts include both the main edit pass AND self-review (the
-    # 2nd LLM call on the stitched output). StubProvider returns
-    # 120/80 per call, so 2 calls = 240/160.
-    assert body["input_tokens"] == 240
-    assert body["output_tokens"] == 160
-    # The provider was actually invoked at least twice (edit + self-review).
+    # The StubProvider returns its three-section edit response to the
+    # self-review call too — that's not valid JSON, so the review pass
+    # (correctly) errors out and only the main pass's tokens are counted.
+    assert body["input_tokens"] == 120
+    assert body["output_tokens"] == 80
+    # The provider was still invoked twice (edit + attempted self-review).
     assert len(stub.calls) >= 2
 
 
@@ -367,6 +367,54 @@ def test_run_stream_emits_expected_events(app_client) -> None:
     # plan must come first, saved last.
     assert event_names[0] == "plan"
     assert event_names[-1] == "saved"
+
+
+def test_run_stream_forwards_self_review_events(app_client) -> None:
+    """v0.0.20's headline feature must be visible at the HTTP layer —
+    the SSE stream carries self_review_start and a terminal
+    self_review_done OR self_review_error before complete.
+    """
+    client, _ = app_client
+    with client.stream(
+        "POST",
+        "/api/run-stream",
+        json={"transcript": "Speaker 1: Hi there friend.", "format": "txt"},
+    ) as res:
+        body = "".join(res.iter_text())
+        assert res.status_code == 200
+
+    event_names = [
+        line.split("event: ", 1)[1].strip()
+        for line in body.splitlines()
+        if line.startswith("event: ")
+    ]
+    assert "self_review_start" in event_names
+    assert ("self_review_done" in event_names) or ("self_review_error" in event_names)
+    # Review events come after the last chunk_done, before complete.
+    assert event_names.index("self_review_start") > event_names.index("chunk_done")
+    assert event_names.index("self_review_start") < event_names.index("complete")
+
+
+def test_accept_suggestions_handles_jargon_kind(app_client) -> None:
+    """Bootstrap emits kind='jargon' — accept-suggestions used to silently
+    skip those. They land as terms with type defaulting to 'jargon'."""
+    client, _ = app_client
+    res = client.post(
+        "/api/library/accept-suggestions",
+        json={
+            "suggestions": [
+                # NOT in the seed pack — a fresh canonical so the type
+                # assertion tests the new insert, not a seed-pack merge.
+                {"kind": "jargon", "canonical": "world-model-pretraining", "aliases_seen": ["WMP"]},
+            ]
+        },
+    )
+    assert res.status_code == 200
+    assert res.json()["accepted"]["terms"] == 1
+    assert res.json()["accepted"]["skipped"] == 0
+    listing = client.get("/api/library/terms?q=world-model-pretraining").json()["terms"]
+    entry = next(t for t in listing if t["canonical"] == "world-model-pretraining")
+    assert entry["type"] == "jargon"
 
 
 def test_run_stream_rejects_empty(app_client) -> None:

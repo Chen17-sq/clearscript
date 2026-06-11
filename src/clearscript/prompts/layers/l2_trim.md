@@ -1,6 +1,23 @@
 # L2: Head/Tail Trimming
 
-Strip non-substantive content from the start and end of the transcript.
+Strip non-substantive content from the start and end of the **recording**
+— not of whatever text you happen to receive.
+
+## Chunk-position rule (read first)
+
+Long transcripts are split into chunks, and the user prompt tells you
+which chunk you're editing ("Chunk position: i of N"):
+
+- **First chunk** → trimming the START is allowed; the end is
+  mid-conversation, leave it alone.
+- **Last chunk** → trimming the END is allowed; the start is
+  mid-conversation, leave it alone.
+- **Middle chunk** → NO head/tail trimming at all. The "start" of a
+  middle chunk is the continuation of the previous sentence — deleting
+  it destroys real content. Only the AI-summary-block rule below still
+  applies (those can appear anywhere a tool injected them).
+- **No chunk position stated** → the text is the whole recording; both
+  ends are in scope.
 
 ## Strip
 

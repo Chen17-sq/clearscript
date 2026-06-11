@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import pytest
 
 from clearscript.providers.base import ChatMessage, ChatResponse
@@ -59,3 +61,46 @@ def tmp_library(tmp_path):  # type: ignore[no-untyped-def]
     lib = Library(tmp_path / "library.db")
     yield lib
     lib.close()
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_environment(tmp_path, monkeypatch):  # type: ignore[no-untyped-def]
+    """Keep the suite hermetic on developer machines.
+
+    1. Prompt overrides: a real ``~/.config/clearscript/prompts/`` on the
+       dev's machine would silently replace the bundled prompts under test.
+       Point the override dir at an empty tmp dir.
+    2. OS keyring: /api/providers and resolve_api_key probe the real
+       keychain — slow, non-deterministic, and can pop interactive prompts
+       on macOS. Substitute an in-memory fake for every test.
+    """
+    monkeypatch.setattr(
+        "clearscript.prompts._USER_OVERRIDE_DIR", tmp_path / "prompt-overrides"
+    )
+
+    class _FakeKeyringErrors:
+        class PasswordDeleteError(Exception):
+            pass
+
+    class _FakeKeyring:
+        errors = _FakeKeyringErrors
+        _store: ClassVar[dict[tuple[str, str], str]] = {}
+
+        @classmethod
+        def get_password(cls, service, account):  # type: ignore[no-untyped-def]
+            return cls._store.get((service, account))
+
+        @classmethod
+        def set_password(cls, service, account, password):  # type: ignore[no-untyped-def]
+            cls._store[(service, account)] = password
+
+        @classmethod
+        def delete_password(cls, service, account):  # type: ignore[no-untyped-def]
+            if (service, account) not in cls._store:
+                raise _FakeKeyringErrors.PasswordDeleteError("not found")
+            del cls._store[(service, account)]
+
+    _FakeKeyring._store = {}
+    import sys
+
+    monkeypatch.setitem(sys.modules, "keyring", _FakeKeyring)

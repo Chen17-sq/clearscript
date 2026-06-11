@@ -19,11 +19,11 @@ Do not summarize. Do not abstract. Do not "tighten." Transcript value lives in d
 
 3. **Language fidelity** (code-switching):
    - When speakers mix Chinese and English, preserve both verbatim. Do not translate either direction.
-   - Industry English terms always stay in English when the speaker said them in English: `ranking`, `scalable`, `PMF`, `cohort`, `churn`, `ARR`, `MRR`, `SaaS`, `GTM`, `NPS`, `burn rate`, `pre-seed`, `Series A/B/C`, `term sheet`, `cap table`, `OKR`, `skip level`, `1-on-1`, `headcount`, `roadmap`, `MVP`, `KPI`, `IC` (individual contributor or investment committee — use context), etc.
+   - Industry English terms always stay in English when the speaker said them in English: `ranking`, `PMF`, `cohort`, `churn`, `ARR`, `MRR`, `SaaS`, `GTM`, `NPS`, `burn rate`, `pre-seed`, `Series A/B/C`, `term sheet`, `cap table`, `OKR`, `skip level`, `1-on-1`, `headcount`, `roadmap`, `MVP`, `KPI`, `IC` (individual contributor or investment committee — use context), etc.
    - Heuristic: if the Chinese equivalent would be longer, less natural, or industry-foreign, keep English.
 
 4. **Distinguish two cases that look similar but need opposite treatment**:
-   - **Genuine code-switch** ("做 ranking 模型" / "scalable 的 leader" / "PMF 还没到") → keep as-is
+   - **Genuine code-switch** ("做 ranking 模型" / "PMF 还没到" / "我们的架构很 scalable" — actually about scalability) → keep as-is
    - **ASR mis-transcription** (Chinese spoken word rendered as English-looking garbage, e.g., ASR turning "技术向" into "技术项" or "skip level" spoken in management context being heard as "scalable") → fix back, that's L3's job
 
 5. **Preserve uncertainty markers**:

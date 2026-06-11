@@ -33,7 +33,7 @@ mechanically. If library has confirmed speaker aliases, apply those.
 For speakers not covered by briefing/library:
 
 - **Interviewer**: short turns, mostly questions and backchannels →
-  use `受访者询问者：` if no real name, OR infer from context (host of
+  use `访谈者：` if no real name, OR infer from context (host of
   the show, the analyst named in briefing, etc.)
 - **Interviewee**: long, content-rich turns → use the real name if
   mentioned in self-introduction or in briefing, else `受访者：`

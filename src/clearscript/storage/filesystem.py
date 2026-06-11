@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 import re
 import shutil
 from dataclasses import dataclass
@@ -67,15 +68,26 @@ class Project:
         return self.final_dir / "transcript.docx"
 
     def write_meta(self, data: dict) -> None:
-        self.meta_path.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        # Atomic write: write to a sibling temp file then os.replace so a
+        # crash mid-write can't leave a truncated meta.json. A single
+        # corrupted meta used to brick /api/projects (list_summaries calls
+        # read_meta on every project while sorting).
+        payload = json.dumps(data, ensure_ascii=False, indent=2)
+        tmp_path = self.meta_path.with_suffix(".json.tmp")
+        tmp_path.write_text(payload, encoding="utf-8")
+        os.replace(tmp_path, self.meta_path)
 
     def read_meta(self) -> dict:
         if not self.meta_path.is_file():
             return {}
-        return json.loads(self.meta_path.read_text(encoding="utf-8"))
+        try:
+            data = json.loads(self.meta_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            # One mangled meta.json must not take down every listing
+            # endpoint. Treat as empty; the project still shows up with
+            # its slug, just without metadata.
+            return {}
+        return data if isinstance(data, dict) else {}
 
     def ensure_dirs(self) -> None:
         for d in (self.raw_dir, self.final_dir):

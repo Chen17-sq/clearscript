@@ -70,9 +70,17 @@ For every suspicious token from Step 2:
    still add a SUGGESTIONS entry flagging it as "unrecognized proper
    noun, may be ASR artifact" so the user can investigate.
 
-**You should be making 3-15 L3 corrections per minute of transcript** if
-the speakers used proper nouns at all. If you finish a 60-minute
-transcript with zero L3 changes, you almost certainly missed something.
+**Calibration for RAW ASR input**: expect 3-15 L3 corrections per minute
+of transcript if the speakers used proper nouns at all. Finishing a raw
+60-minute transcript with zero L3 changes almost always means you missed
+errors — go back through Step 2.
+
+**Calibration for ALREADY-CLEAN input**: if the transcript shows signs of
+prior cleanup (canonical names already correct, consistent speaker labels,
+no ASR artifacts — common on re-runs), **zero or near-zero L3 changes is
+the correct answer**. Never invent corrections to look productive; every
+change must point at a real, identifiable ASR error. An empty changelog
+on clean input is success, not failure.
 
 ## Phonetic similarity patterns (Mandarin + English ASR)
 
@@ -82,13 +90,12 @@ ASR systems consistently confuse these. Look for them aggressively:
 
 | ASR wrote | Speaker likely said | Common contexts |
 |---|---|---|
-| 技术向 | 技术项 | discussing project categorization |
+| 技术向 ↔ 技术项 | context decides | 技术项 when itemizing project line-items; 技术向 when describing an orientation (技术向的人). Don't auto-swap — check which fits |
 | 巨身 / 据身 / 居室 | 具身 | embodied AI |
-| 视觉模型 | 世界模型 | AI4Sci / 世界模型公司 |
+| 视觉模型 | 世界模型 | only when the topic is world models, NOT vision models — check context |
 | 凡demination / 弗 daun | foundation | foundation model |
 | 阿尖体克 / 阿genti | agentic | AI agents |
-| 推理 (when discussing rich-people) | 推理 stays as 推理 | careful — different from inference |
-| 阿丽 / 安丽 / 艾迪 | Eileen | speaker name |
+| 阿丽 / 安丽 / 艾迪 | Eileen | speaker name (when briefing/library names an Eileen) |
 | 四七 | Siqi | speaker name |
 
 ### English ASR confusions (common in code-switched Chinese transcripts)
@@ -110,7 +117,7 @@ ASR systems consistently confuse these. Look for them aggressively:
 | WebSphere | web search | familiar word eats unfamiliar phrase |
 | double E A T | E-E-A-T | letter-by-letter reading of acronym |
 | GRU | GEO | acronym hallucinated to closest known one |
-| scalable | skip level | management context lost |
+| scalable | skip level | ONLY in 1-on-1/org-chart contexts (skip-level meeting); when the speaker is genuinely discussing scalability, keep `scalable` |
 | SOG | SLG | letter shape similarity |
 | PNF / PMS | PMF | VC acronym distortion |
 

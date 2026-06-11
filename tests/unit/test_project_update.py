@@ -42,8 +42,10 @@ def _make_test_config(tmp_path: Path) -> Config:
 
 def _patch_config(monkeypatch, tmp_path: Path) -> None:
     cfg = _make_test_config(tmp_path)
-    monkeypatch.setattr("clearscript.server.load_config", lambda: cfg)
-    monkeypatch.setattr("clearscript.server.ensure_dirs", lambda c: None)
+    # The server implementation moved to clearscript.api; AppState.cfg()
+    # calls load_config/ensure_dirs through the clearscript.api.deps module.
+    monkeypatch.setattr("clearscript.api.deps.load_config", lambda: cfg)
+    monkeypatch.setattr("clearscript.api.deps.ensure_dirs", lambda c: None)
     cfg.projects_root.mkdir(parents=True, exist_ok=True)
     cfg.library_path.parent.mkdir(parents=True, exist_ok=True)
 

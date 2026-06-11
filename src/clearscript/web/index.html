@@ -749,7 +749,7 @@
       // library beyond the seed pack). The "🚀 Train library" button
       // in the provider strip is ALWAYS visible — this CTA is just an
       // extra nudge for fresh users.
-      if (localStorage.getItem('clearscript-bootstrap-dismissed') === '1') {
+      if (safeLocalStorageGet('clearscript-bootstrap-dismissed') === '1') {
         return;
       }
       if (state.bootstrapDismissed) return;
@@ -759,7 +759,7 @@
 
     function dismissBootstrapCTA() {
       state.bootstrapDismissed = true;
-      localStorage.setItem('clearscript-bootstrap-dismissed', '1');
+      safeLocalStorageSet('clearscript-bootstrap-dismissed', '1');
       const cta = document.getElementById('bootstrap-cta');
       if (cta) cta.classList.add('hidden');
     }
@@ -860,7 +860,7 @@
       };
 
       const close = () => modal.remove();
-      document.getElementById('cs-bs-close').addEventListener('click', close);
+      document.getElementById('cs-bootstrap-close').addEventListener('click', close);
       modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
 
       const fileInput = document.getElementById('cs-bs-files');
@@ -868,15 +868,32 @@
       dropZone.addEventListener('click', () => fileInput.click());
       dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('bg-yellow'); });
       dropZone.addEventListener('dragleave', () => dropZone.classList.remove('bg-yellow'));
+      const TEXT_EXTS = ['.txt', '.md', '.markdown', '.srt', '.vtt', '.json'];
+      const filterTextFiles = (files) => {
+        const ok = [], rejected = [];
+        for (const f of files) {
+          const ext = '.' + (f.name.split('.').pop() || '').toLowerCase();
+          (TEXT_EXTS.includes(ext) ? ok : rejected).push(f);
+        }
+        if (rejected.length) {
+          alert(`Skipped ${rejected.length} unsupported file(s): ` +
+            rejected.map((f) => f.name).join(', ') +
+            '\n\nBootstrap reads text formats only (' + TEXT_EXTS.join(' ') + '). ' +
+            'For .docx, run them through the Editor tab individually.');
+        }
+        return ok;
+      };
       dropZone.addEventListener('drop', (e) => {
         e.preventDefault();
         dropZone.classList.remove('bg-yellow');
-        const newFiles = Array.from(e.dataTransfer.files);
+        // Drag-drop bypasses the <input accept> filter — a dropped .docx
+        // read via f.text() silently becomes garbage bytes in the prompt.
+        const newFiles = filterTextFiles(Array.from(e.dataTransfer.files));
         bsState.files = bsState.files.concat(newFiles).slice(0, 50);
         renderFileList();
       });
       fileInput.addEventListener('change', () => {
-        const newFiles = Array.from(fileInput.files || []);
+        const newFiles = filterTextFiles(Array.from(fileInput.files || []));
         bsState.files = bsState.files.concat(newFiles).slice(0, 50);
         renderFileList();
       });
@@ -1330,6 +1347,8 @@
       r.readAsText(f);
     }
     function setRunning(on) {
+      state.running = on;  // keyboard shortcut checks this — the disabled
+                           // button alone doesn't stop Cmd+Enter
       const btn = $('run-btn');
       btn.disabled = on;
       btn.innerHTML = on ? '<span class="inline-block animate-pulse">⏳ Running…</span>' : '▶  Clean transcript';
@@ -1346,21 +1365,45 @@
     }
     function hideProgress() { $('progress-panel').classList.add('hidden'); }
 
+    function safeLocalStorageGet(key) {
+      // localStorage throws in some private-browsing / blocked-storage
+      // setups — a settings read must never take down the Run button.
+      try { return localStorage.getItem(key); } catch (e) { return null; }
+    }
+    function safeLocalStorageSet(key, value) {
+      try { localStorage.setItem(key, value); } catch (e) { /* ignore */ }
+    }
+
     async function runPipeline() {
+      if (state.running) return;  // belt-and-suspenders vs. double trigger
       const usingBinaryUpload = state.pendingFile && BINARY_FORMATS.has(state.pendingFormat);
       const transcript = $('transcript-input').value.trim();
       if (!usingBinaryUpload && !transcript) { setStatus('Paste or upload a transcript first.', 'warn'); return; }
       if (!state.selectedProvider) { setStatus('Pick a provider with an API key set.', 'warn'); return; }
 
-      // Pre-flight cost confirmation. The cost preview already runs on
-      // every keystroke; we use the last fetched estimate. If it's above
-      // the soft cap ($0.50 default), require explicit confirmation so a
-      // non-tech user doesn't accidentally burn $50 on a 2-hour
-      // founder-interview through Claude Opus.
+      // Pre-flight cost confirmation. Fetch a FRESH estimate for the
+      // exact text about to run — the debounced preview estimate can be
+      // stale (user pasted 10× more text and clicked Run before the
+      // 350ms debounce fired), which would let an expensive run slip
+      // past the cap.
       const COST_SOFT_CAP_USD = parseFloat(
-        localStorage.getItem('clearscript-cost-cap') || '0.50',
+        safeLocalStorageGet('clearscript-cost-cap') || '0.50',
       );
-      const est = state.lastCostEstimate;
+      let est = state.lastCostEstimate;
+      if (!usingBinaryUpload && transcript) {
+        try {
+          const res = await fetch('/api/estimate-cost', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              transcript,
+              provider: state.selectedProvider,
+              model: $('model-input').value.trim() || null,
+            }),
+          });
+          if (res.ok) { est = await res.json(); state.lastCostEstimate = est; }
+        } catch (e) { /* fall back to the cached preview estimate */ }
+      }
       if (est && est.pricing_known && est.total_cost_usd > COST_SOFT_CAP_USD) {
         const msg =
           `This run is estimated at ~$${est.total_cost_usd.toFixed(4)} ` +
@@ -1679,7 +1722,10 @@
 
     // ============ Diff rendering ============
     function escapeHtmlSimple(s) {
-      return String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+      // Quotes MUST be escaped too — this output lands inside title="..."
+      // attributes (renderDiff tooltips), where an unescaped double quote
+      // from model output would break out of the attribute (XSS).
+      return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     }
     function layerClass(layer) {
       const l = String(layer || '').toUpperCase().replace('.', '');
@@ -1823,32 +1869,30 @@
         const row = document.createElement('label');
         row.className = 'flex items-start gap-3 border-2 border-ink bg-white p-3 cursor-pointer hover:bg-bg';
         const kindColor = { term: 'bg-red text-white', speaker: 'bg-blue text-white', edit_pattern: 'bg-yellow text-ink' }[s.kind] || 'bg-white text-ink';
+        // Everything below is MODEL OUTPUT — escape every interpolation.
+        const aliasesText = s.aliases_seen?.length ? `← ${escapeHtml(s.aliases_seen.join(', '))}` : '';
         const summary = s.kind === 'term'
-          ? `<b>${s.canonical || '?'}</b> ${s.aliases_seen?.length ? `← ${s.aliases_seen.join(', ')}` : ''}`
+          ? `<b>${escapeHtml(s.canonical || '?')}</b> ${aliasesText}`
           : s.kind === 'speaker'
-          ? `<b>${s.canonical_name || '?'}</b> as <code>${s.display_label || ''}</code> ${s.aliases_seen?.length ? `← ${s.aliases_seen.join(', ')}` : ''}`
-          : `<b>${s.title || '?'}</b>`;
+          ? `<b>${escapeHtml(s.canonical_name || '?')}</b> as <code>${escapeHtml(s.display_label || '')}</code> ${aliasesText}`
+          : `<b>${escapeHtml(s.title || '?')}</b>`;
         row.innerHTML = `
           <input type="checkbox" data-idx="${i}" class="suggestion-check mt-1" ${state.selectedSuggestions.has(i) ? 'checked' : ''} />
           <div class="flex-1">
             <div class="flex items-center gap-2 mb-1">
-              <span class="${kindColor} border-2 border-ink px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest">${s.kind}</span>
-              ${s.type ? `<span class="border-2 border-ink bg-white text-ink px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest">${s.type}</span>` : ''}
-              ${s.domain ? `<span class="border-2 border-ink bg-bg text-ink px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest">${s.domain}</span>` : ''}
+              <span class="${kindColor} border-2 border-ink px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest">${escapeHtml(s.kind)}</span>
+              ${s.type ? `<span class="border-2 border-ink bg-white text-ink px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest">${escapeHtml(s.type)}</span>` : ''}
+              ${s.domain ? `<span class="border-2 border-ink bg-bg text-ink px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest">${escapeHtml(s.domain)}</span>` : ''}
             </div>
             <div class="text-sm">${summary}</div>
-            ${s.rationale ? `<div class="text-xs text-ink/60 mt-1 italic">${s.rationale}</div>` : ''}
+            ${s.rationale ? `<div class="text-xs text-ink/60 mt-1 italic">${escapeHtml(s.rationale)}</div>` : ''}
           </div>
         `;
         list.appendChild(row);
       });
-      list.addEventListener('change', (e) => {
-        if (e.target.classList.contains('suggestion-check')) {
-          const i = parseInt(e.target.dataset.idx, 10);
-          if (e.target.checked) state.selectedSuggestions.add(i);
-          else state.selectedSuggestions.delete(i);
-        }
-      });
+      // NOTE: the change listener for .suggestion-check is attached ONCE at
+      // boot (see DOMContentLoaded) — attaching here stacked a duplicate
+      // listener on every render, toggling selection state 2-3× per click.
     }
     async function acceptSuggestions() {
       const picked = Array.from(state.selectedSuggestions).map((i) => state.suggestions[i]);
@@ -1987,17 +2031,14 @@
         `;
         tbody.appendChild(tr);
       });
-      tbody.addEventListener('click', termTbodyClick, { once: true });
     }
     async function termTbodyClick(e) {
       if (e.target.classList.contains('term-delete-btn')) {
         const id = e.target.dataset.id;
-        if (!confirm(`Delete term ${id}?`)) { loadTerms(); return; }
+        if (!confirm(`Delete term ${id}?`)) return;
         await fetch(`/api/library/terms/${id}`, { method: 'DELETE' });
         loadTerms(); loadLibStats();
-        return;
       }
-      loadTerms();
     }
     async function addTerm() {
       const canonical = $('add-term-canonical').value.trim();
@@ -2042,13 +2083,13 @@
         `;
         tbody.appendChild(tr);
       });
-      tbody.addEventListener('click', async (e) => {
-        if (e.target.classList.contains('speaker-delete-btn')) {
-          if (!confirm('Delete this speaker?')) return;
-          await fetch(`/api/library/speakers/${e.target.dataset.id}`, { method: 'DELETE' });
-          loadSpeakers(); loadLibStats();
-        }
-      }, { once: true });
+    }
+    async function speakerTbodyClick(e) {
+      if (e.target.classList.contains('speaker-delete-btn')) {
+        if (!confirm('Delete this speaker?')) return;
+        await fetch(`/api/library/speakers/${e.target.dataset.id}`, { method: 'DELETE' });
+        loadSpeakers(); loadLibStats();
+      }
     }
     async function addSpeaker() {
       const name = $('add-speaker-name').value.trim();
@@ -2094,13 +2135,13 @@
         `;
         list.appendChild(card);
       });
-      list.addEventListener('click', async (e) => {
-        if (e.target.classList.contains('pattern-delete-btn')) {
-          if (!confirm('Delete this pattern?')) return;
-          await fetch(`/api/library/patterns/${e.target.dataset.id}`, { method: 'DELETE' });
-          loadPatterns(); loadLibStats();
-        }
-      }, { once: true });
+    }
+    async function patternListClick(e) {
+      if (e.target.classList.contains('pattern-delete-btn')) {
+        if (!confirm('Delete this pattern?')) return;
+        await fetch(`/api/library/patterns/${e.target.dataset.id}`, { method: 'DELETE' });
+        loadPatterns(); loadLibStats();
+      }
     }
     async function addPattern() {
       const title = $('add-pattern-title').value.trim();
@@ -2145,13 +2186,13 @@
         `;
         list.appendChild(card);
       });
-      list.addEventListener('click', async (e) => {
-        if (e.target.classList.contains('neg-delete-btn')) {
-          if (!confirm('Delete this negative rule?')) return;
-          await fetch(`/api/library/negatives/${e.target.dataset.id}`, { method: 'DELETE' });
-          loadNegatives(); loadLibStats();
-        }
-      }, { once: true });
+    }
+    async function negativesListClick(e) {
+      if (e.target.classList.contains('neg-delete-btn')) {
+        if (!confirm('Delete this negative rule?')) return;
+        await fetch(`/api/library/negatives/${e.target.dataset.id}`, { method: 'DELETE' });
+        loadNegatives(); loadLibStats();
+      }
     }
     async function addNegative() {
       const text = $('add-neg-text').value.trim();
@@ -2210,27 +2251,27 @@
         list.appendChild(card);
       });
       state.inboxItems = items;
-      list.addEventListener('click', async (e) => {
-        const idx = e.target.dataset.idx;
-        if (idx === undefined) return;
-        const item = state.inboxItems[Number(idx)];
-        if (!item) return;
-        if (e.target.classList.contains('inbox-accept-btn')) {
-          await fetch('/api/library/accept-suggestions', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ suggestions: [item] }),
-          });
-          loadInbox(); loadLibStats();
-        } else if (e.target.classList.contains('inbox-reject-btn')) {
-          await fetch('/api/library/suggestions/inbox/dismiss', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ kind: item.kind, identity: item.canonical || item.canonical_name || item.title }),
-          });
-          loadInbox();
-        }
-      }, { once: true });
+    }
+    async function inboxListClick(e) {
+      const idx = e.target.dataset.idx;
+      if (idx === undefined) return;
+      const item = (state.inboxItems || [])[Number(idx)];
+      if (!item) return;
+      if (e.target.classList.contains('inbox-accept-btn')) {
+        await fetch('/api/library/accept-suggestions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ suggestions: [item] }),
+        });
+        loadInbox(); loadLibStats();
+      } else if (e.target.classList.contains('inbox-reject-btn')) {
+        await fetch('/api/library/suggestions/inbox/dismiss', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ kind: item.kind, identity: item.canonical || item.canonical_name || item.title }),
+        });
+        loadInbox();
+      }
     }
     async function acceptAllInbox() {
       const items = state.inboxItems || [];
@@ -2674,6 +2715,23 @@
       $$('.tab-btn').forEach((b) => b.addEventListener('click', () => setTab(b.dataset.tab)));
       $$('.lib-subtab').forEach((b) => b.addEventListener('click', () => setSubtab(b.dataset.subtab)));
 
+      // Persistent delegated listeners for re-rendered lists. Attached
+      // ONCE here — the old pattern attached them inside each load
+      // function with { once: true }, which dropped clicks after the
+      // first interaction and stacked duplicate handlers across renders.
+      $('terms-tbody').addEventListener('click', termTbodyClick);
+      $('speakers-tbody').addEventListener('click', speakerTbodyClick);
+      $('patterns-list').addEventListener('click', patternListClick);
+      $('negatives-list').addEventListener('click', negativesListClick);
+      $('inbox-list').addEventListener('click', inboxListClick);
+      $('suggestions-list').addEventListener('change', (e) => {
+        if (e.target.classList.contains('suggestion-check')) {
+          const i = parseInt(e.target.dataset.idx, 10);
+          if (e.target.checked) state.selectedSuggestions.add(i);
+          else state.selectedSuggestions.delete(i);
+        }
+      });
+
       // Settings (API keys)
       $('settings-btn').addEventListener('click', showSettingsModal);
 
@@ -2714,7 +2772,12 @@
       });
       $('file-badge-clear').addEventListener('click', clearPendingFile);
       $('transcript-input').addEventListener('keydown', (e) => {
-        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); runPipeline(); }
+        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+          e.preventDefault();
+          // Respect the disabled Run button — firing a second pipeline
+          // mid-run corrupts the output textarea and double-spends tokens.
+          if (!state.running) runPipeline();
+        }
       });
 
       // Suggestions

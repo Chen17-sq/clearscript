@@ -117,12 +117,14 @@ class TestSlugHintFromInput:
         hint = _slug_hint_from_input(None, None, title=long_title)
         assert len(hint) <= 50
 
-    def test_pleasantry_filename_falls_through(self) -> None:
-        """A file named 'ok.txt' must not become the slug."""
+    def test_filename_always_wins_even_when_short(self) -> None:
+        """Filenames are user-chosen — the mic-check heuristics don't
+        apply to them. 'ok.txt' was deliberately named by the user, so
+        'ok' IS the right slug (the old behavior rejected legit short or
+        Chinese filename stems as 'pleasantries').
+        """
         hint = _slug_hint_from_input(
             "Speaker 1: Founder background check on Acme",
             "ok.txt",
         )
-        # The filename stem 'ok' is < 6 chars → pleasantry. Falls through
-        # to transcript content.
-        assert "Acme" in hint or hint == "transcript"
+        assert hint == "ok"

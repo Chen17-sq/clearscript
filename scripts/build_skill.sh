@@ -16,8 +16,11 @@ cd "$ROOT"
 DIST="$ROOT/dist"
 STAGING="$DIST/clearscript"
 
-echo "→ cleaning $DIST"
-rm -rf "$DIST"
+# Clean ONLY our own outputs. `rm -rf "$DIST"` used to wipe the wheel and
+# sdist that `uv build` had just produced — every GitHub release shipped
+# without installable artifacts because of that line.
+echo "→ cleaning skill staging + previous bundle"
+rm -rf "$STAGING" "$DIST/clearscript.skill"
 mkdir -p "$STAGING/prompts" "$STAGING/scripts" "$STAGING/references"
 
 echo "→ copying SKILL.md"

@@ -1,6 +1,6 @@
 [project]
 name = "clearscript"
-version = "0.0.20"
+version = "0.0.21"
 description = "Local-first ASR transcript editor with a compounding terminology library. Bring your own model."
 readme = "README.md"
 license = { text = "MIT" }
@@ -90,13 +90,13 @@ Changelog = "https://github.com/Chen17-sq/clearscript/blob/main/CHANGELOG.md"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+# hatchling packages EVERY file under src/clearscript by default — prompts/*.md,
+# library/schema.sql, web/index.html are all picked up as package data. Do NOT
+# re-add a force-include section for them: hatchling ≥1.30 hard-errors on
+# duplicate archive paths, which made `uv build` (and therefore
+# `uv tool install git+...`) fail outright.
 [tool.hatch.build.targets.wheel]
 packages = ["src/clearscript"]
-
-[tool.hatch.build.targets.wheel.force-include]
-"src/clearscript/prompts" = "clearscript/prompts"
-"src/clearscript/library/schema.sql" = "clearscript/library/schema.sql"
-"src/clearscript/web/index.html" = "clearscript/web/index.html"
 
 [dependency-groups]
 dev = [

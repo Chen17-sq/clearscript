@@ -176,7 +176,9 @@ def test_token_counts_are_summed_across_chunks(tmp_path: Path) -> None:
     _write_long_transcript(input_path)
 
     provider = RotatingMockProvider()
-    pipeline = Pipeline(provider=provider, model="mock-1")
+    # Self-review disabled: its extra call (which errors on the mock's
+    # non-JSON response anyway) would skew the per-chunk token arithmetic.
+    pipeline = Pipeline(provider=provider, model="mock-1", enable_self_review=False)
     result = pipeline.run(input_path)
 
     # Each call returns input_tokens=100, output_tokens=80

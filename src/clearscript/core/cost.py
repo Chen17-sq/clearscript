@@ -85,6 +85,17 @@ _PRICING: dict[str, dict[str, tuple[float, float]]] = {
 _OUTPUT_RATIO = 1.5
 
 
+# Fixed overhead the estimate must account for beyond the raw transcript:
+# the composed system prompt (system_base + stage 04 + seven layer specs +
+# library context) rides along with EVERY chunk (~6k tokens), and the
+# self-review pass re-reads the whole output plus the change log. Ignoring
+# these made estimates ~40-60% low — exactly the complaint that prompted
+# the "tell me what it actually cost" feature.
+_SYSTEM_PROMPT_TOKENS_PER_CHUNK = 6000
+_CHUNK_SIZE_TOKENS = 3500  # mirrors chunking.DEFAULT_TARGET_TOKENS
+_SELF_REVIEW_FACTOR = 1.35  # second pass reads output + changelog
+
+
 def estimate_cost(
     *,
     transcript_text: str,
@@ -92,9 +103,18 @@ def estimate_cost(
     model: str,
     output_ratio: float = _OUTPUT_RATIO,
 ) -> CostEstimate:
-    """Estimate cost for processing ``transcript_text`` with the given provider/model."""
-    input_tokens = estimate_tokens(transcript_text)
-    output_tokens = int(input_tokens * output_ratio)
+    """Estimate cost for processing ``transcript_text`` with the given provider/model.
+
+    Includes per-chunk system-prompt overhead and the self-review second
+    pass, not just the transcript body.
+    """
+    transcript_tokens = estimate_tokens(transcript_text)
+    est_chunks = max(1, -(-transcript_tokens // _CHUNK_SIZE_TOKENS))  # ceil div
+    input_tokens = int(
+        (transcript_tokens + est_chunks * _SYSTEM_PROMPT_TOKENS_PER_CHUNK)
+        * _SELF_REVIEW_FACTOR
+    )
+    output_tokens = int(transcript_tokens * output_ratio * _SELF_REVIEW_FACTOR)
 
     provider_table = _PRICING.get(provider_type.lower(), {})
     pricing = provider_table.get(model)

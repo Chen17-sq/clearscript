@@ -10,16 +10,13 @@ it count. Catch real errors; don't second-guess high-confidence work.
 
 ## What you'll receive
 
-A JSON object containing:
+The user message contains, as plain sections:
 
-```json
-{
-  "edited_markdown": "<the cleaned transcript from the main pass>",
-  "change_log": [...],
-  "library_context": "<the user's vocabulary + speakers>",
-  "briefing": "<the user's session briefing, if any>"
-}
-```
+- **Session briefing** (if any) — the user's context for this transcript
+- **Library vocabulary** — canonical ← alias mappings to audit against
+- **First-pass change log** — a JSON array of the edits already made
+- **Cleaned transcript** — between `<<<TRANSCRIPT_START>>>` and
+  `<<<TRANSCRIPT_END>>>` markers. Do NOT echo it back in your output.
 
 ## Mandatory review routine
 
@@ -89,7 +86,10 @@ This is the failsafe. Look at the `change_log` for entries with:
 If any feel like fluency edits rather than true error fixes, propose
 a rollback.
 
-## Output format (JSON, no markdown fence)
+## Output format
+
+A single JSON object (raw JSON preferred; a ```json fence is tolerated —
+the parser strips it). No prose before or after.
 
 ```json
 {

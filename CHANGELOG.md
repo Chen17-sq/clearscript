@@ -7,6 +7,126 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.21] - 2026-06-11
+
+### The deep-audit release: 61-agent review, 52 confirmed findings, refactor + fixes.
+
+User directive: "全面继续做，重构可以". Ran a multi-agent audit (6 parallel
+reviewers over server / pipeline / web JS / prompts / library / packaging,
+every finding adversarially verified by independent agents — 52 confirmed,
+3 refuted), then refactored the server and fixed everything that mattered.
+
+### Refactored — server.py → clearscript/api/ package
+
+The 1,558-line ``create_app`` closure (46 endpoints) is now seven focused
+modules: ``deps`` (AppState: lazy config, library factory, provider
+resolution), ``models``, ``slugs``, ``routes_core``, ``routes_providers``,
+``routes_run``, ``routes_projects``, ``routes_library``.
+``clearscript.server`` remains as a compatibility shim. Route table
+verified byte-identical (54 routes) before and after.
+
+### Fixed — P0s
+
+- **`uv build` failed outright** — the wheel force-include section
+  duplicated files hatchling already packages; hatchling ≥1.30 hard-errors
+  on duplicate archive paths. **`uv tool install git+...` was broken for
+  everyone.** Removed the redundant force-include.
+- **Every GitHub release shipped without the wheel/sdist** —
+  ``build_skill.sh`` ran ``rm -rf dist/`` AFTER ``uv build``, wiping the
+  installable artifacts; the release action's default
+  ``fail_on_unmatched_files: false`` published anyway. Both fixed, plus a
+  verify step that fails the release if any artifact is missing.
+- **SQLite thread-affinity crash in SSE streams** — Starlette drives sync
+  generators on a threadpool where every ``next()`` can land on a
+  different thread; ``sqlite3.connect`` defaults to
+  ``check_same_thread=True``, so concurrent requests killed paid runs
+  mid-stream with ``ProgrammingError``. Now ``check_same_thread=False``
+  (access is sequential per generator, so this is safe).
+- **Train-library modal was completely dead** — the close-button wiring
+  looked up ``cs-bs-close`` but the button's id is ``cs-bootstrap-close``;
+  the resulting TypeError killed ALL subsequent modal wiring (file drop,
+  Run button). One id, whole feature dead.
+
+### Fixed — P1s
+
+- **Client disconnect mid-stream lost the finished run**: persistence now
+  happens the moment the ``complete`` event is produced, before the next
+  yield — closing the tab after completion can no longer discard a paid
+  run.
+- **One corrupted meta.json bricked /api/projects, the inbox, and
+  compare**: ``read_meta`` is now tolerant, ``write_meta`` is atomic
+  (tmp + ``os.replace``).
+- **L2 trimmed mid-transcript content on multi-chunk runs**: the user
+  prompt now carries "Chunk position: i of N" and l2_trim.md scopes
+  head-trimming to the first chunk, tail-trimming to the last, and NO
+  trimming on middle chunks.
+- **Self-review could silently delete text** (empty ``new``) **or replace
+  the wrong occurrence** (ambiguous ``old``): both cases now route to
+  user-review diagnostics instead of being applied.
+- **Bootstrap 'jargon' candidates silently dropped on Accept** — now
+  stored as terms with type ``jargon``.
+- **XSS via model output**: ``escapeHtmlSimple`` didn't escape quotes
+  (attribute injection through diff tooltips); ``renderSuggestions``
+  interpolated canonical/alias/rationale unescaped. All escaped now.
+- **`{once:true}` delegated listeners**: list interactions (delete
+  buttons, inbox accept/dismiss, suggestion checkboxes) died after the
+  first interaction and stacked duplicate handlers across renders. All
+  replaced with persistent delegation attached once at boot.
+- **Bootstrap drag-drop accepted binary files** (`.docx` read as text =
+  garbage in the prompt) — dropped files are now extension-filtered with
+  a clear message.
+- **Stale cost-cap gate**: Run now fetches a fresh estimate for the exact
+  text being run instead of trusting the debounced preview.
+- **Cmd+Enter bypassed the disabled Run button** — double-spend guard.
+- **FTS5 search crashed on query-syntax input** (``a AND``, unbalanced
+  quotes) — input is phrase-quoted with a LIKE fallback.
+- **Library export/import dropped status/confidence/definition/notes** —
+  confirmed/verified terms round-tripped back to 'proposed'. Preserved
+  now.
+- **/api/example empty for wheel installs** — the example transcript now
+  ships as package data.
+- **CI never built the wheel** — new ``package`` job builds, installs
+  into a clean venv, verifies data files, boots the app factory, and
+  checks the skill build doesn't clobber artifacts. Matrix extended to
+  Python 3.14.
+
+### Fixed — prompt contradictions (from the prompts auditor)
+
+- L3 and L4 gave opposite instructions for ``scalable``/``skip level``
+  and ``技术向``/``技术项`` — now context-qualified on both sides.
+- Canonical for MAM-9 was ``Mem0`` in L3 but ``Mem9`` in stages 04/07/08
+  — unified to ``Mem0``.
+- Removed two garbled no-op rows from the L3 phonetic table.
+- **"Already clean" calibration**: the 3-15-corrections-per-minute quota
+  now only applies to raw ASR input; on already-clean input (re-runs)
+  zero changes is explicitly the correct answer — no invented edits.
+- Stage 08 re-scan now uses the same three-section output contract as
+  Stage 4.
+- Self-review input restructured: plain sections + ``<<<TRANSCRIPT>>>``
+  markers instead of double-JSON-wrapping the entire document (cheaper,
+  more reliable); fence contradiction resolved.
+
+### Changed
+
+- ``estimate_cost`` now includes per-chunk system-prompt overhead
+  (~6k tokens/chunk) and the self-review factor (×1.35). Estimates were
+  systematically ~40-60% low — the exact complaint that motivated the
+  actual-cost feature.
+- Vocabulary primer: deprecated terms no longer consume cap slots,
+  ranking is by usage instead of recency, and terms already emphasised
+  for the current chunk aren't duplicated.
+- Filenames bypass the mic-check slug heuristics (user-chosen names like
+  ``ok.txt`` or ``好的会议记录.docx`` are legitimate slugs).
+- Test suite is hermetic: fake keyring + isolated prompt-override dir via
+  an autouse fixture (the suite used to probe the real macOS keychain).
+
+### Tests
+
+292 → **306**. All passing, ruff clean, `uv build` + skill build verified,
+browser-level verification of the UI fixes (modal lifecycle, delegated
+listeners across re-renders, escaping) via live preview with zero console
+errors.
+
 ## [0.0.20] - 2026-05-23
 
 ### Added — Self-review pass + L3.5 rewrite

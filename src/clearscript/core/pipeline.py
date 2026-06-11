@@ -194,7 +194,12 @@ class Pipeline:
                 # full ChatResponse with usage.
                 accumulated = ""
                 response = None
-                messages = self._build_messages(chunk, runtime_mappings=runtime_mappings)
+                messages = self._build_messages(
+                    chunk,
+                    runtime_mappings=runtime_mappings,
+                    chunk_index=idx,
+                    chunk_total=plan.num_chunks,
+                )
                 for kind, payload in self.provider.chat_with_progress(
                     messages,
                     self.model,
@@ -318,15 +323,48 @@ class Pipeline:
                 review_output_tokens = review_result["output_tokens"]
                 review_diagnostics = review_result["diagnostics"]
                 # Apply additional_corrections to the stitched markdown.
-                # We do simple string replace because the model's "old" /
-                # "new" are usually verbatim phrases from the document.
+                # Guards (each one is a bug we shipped or nearly shipped):
+                #   - empty/missing 'new' → would silently DELETE text; route
+                #     to user-review diagnostics instead of applying
+                #   - 'old' occurring more than once → replace(…, 1) might hit
+                #     the wrong occurrence; route to user-review instead
+                skipped_ambiguous: list[dict[str, object]] = []
                 for change in review_result["additional_corrections"]:
                     old = str(change.get("old") or "")
                     new = str(change.get("new") or "")
-                    if old and old in stitched and old != new:
-                        stitched = stitched.replace(old, new, 1)
-                        change.setdefault("stage", "self_review")
-                        review_changes.append(change)
+                    if not old or old == new:
+                        continue
+                    if not new.strip():
+                        skipped_ambiguous.append(
+                            {
+                                "location": f"text {old[:60]!r}",
+                                "issue": "self-review proposed deleting this text outright",
+                                "options": ["keep original", "delete"],
+                            }
+                        )
+                        continue
+                    occurrences = stitched.count(old)
+                    if occurrences == 0:
+                        continue
+                    if occurrences > 1:
+                        skipped_ambiguous.append(
+                            {
+                                "location": f"text {old[:60]!r} ({occurrences} occurrences)",
+                                "issue": f"self-review correction to {new[:60]!r} is ambiguous "
+                                "— the original appears multiple times",
+                                "options": [old, new],
+                            }
+                        )
+                        continue
+                    stitched = stitched.replace(old, new, 1)
+                    change.setdefault("stage", "self_review")
+                    review_changes.append(change)
+                if skipped_ambiguous:
+                    promotions = review_diagnostics.setdefault(
+                        "promotions_to_user_review", []
+                    )
+                    if isinstance(promotions, list):
+                        promotions.extend(skipped_ambiguous)
 
                 total_input_tokens += review_input_tokens
                 total_output_tokens += review_output_tokens
@@ -389,6 +427,8 @@ class Pipeline:
         chunk: NormalizedTranscript,
         *,
         runtime_mappings: dict[str, str] | None = None,
+        chunk_index: int = 1,
+        chunk_total: int = 1,
     ) -> list[ChatMessage]:
         """Build the system + user message pair for one chunk's LLM call.
 
@@ -396,6 +436,11 @@ class Pipeline:
         (alias → canonical pairs the model already committed to). Pass it
         through so the system prompt can mention them and the model stays
         consistent across the whole transcript.
+
+        ``chunk_index``/``chunk_total`` tell L2 whether this chunk contains
+        the real head/tail of the transcript. Without them, L2 trimmed
+        "opening pleasantries" off the start of EVERY chunk — deleting
+        mid-transcript content on long recordings.
         """
         library_context = self._collect_library_context(
             chunk, runtime_mappings=runtime_mappings
@@ -406,7 +451,12 @@ class Pipeline:
         )
         return [
             ChatMessage(role="system", content=system_prompt),
-            ChatMessage(role="user", content=self._build_user_prompt(chunk)),
+            ChatMessage(
+                role="user",
+                content=self._build_user_prompt(
+                    chunk, chunk_index=chunk_index, chunk_total=chunk_total
+                ),
+            ),
         ]
 
     def _run_single_chunk(self, chunk: NormalizedTranscript) -> EditResult:
@@ -491,19 +541,27 @@ class Pipeline:
             except Exception:
                 library_block = ""
 
-        user_payload = {
-            "edited_markdown": stitched_markdown,
-            "change_log": change_log[:200],  # cap to keep prompt size bounded
-            "library_context": library_block,
-            "briefing": self.briefing_context or "",
-        }
+        # Plain sections rather than JSON-wrapping the whole transcript:
+        # double-encoding the document inside a JSON string escaped every
+        # quote/newline (token-expensive) and tied review quality to the
+        # model's willingness to read a giant string literal.
+        changelog_json = json.dumps(change_log[:200], ensure_ascii=False)
+        briefing_part = (
+            f"## Session briefing\n\n{self.briefing_context}\n\n" if self.briefing_context else ""
+        )
+        library_part = f"## Library vocabulary\n\n{library_block}\n\n" if library_block else ""
         user_msg = (
-            "Run the self-review routine on the cleaned transcript "
-            "below. Output the JSON object specified in the system prompt "
-            "— nothing else, no markdown fence.\n\n"
-            "```json\n"
-            f"{json.dumps(user_payload, ensure_ascii=False)}\n"
-            "```"
+            "Run the self-review routine. Output the JSON object specified "
+            "in the system prompt — raw JSON preferred; a ```json fence is "
+            "tolerated but add no other prose.\n\n"
+            f"{briefing_part}"
+            f"{library_part}"
+            "## First-pass change log (JSON)\n\n"
+            f"{changelog_json}\n\n"
+            "## Cleaned transcript (between the markers; do NOT echo it back)\n\n"
+            "<<<TRANSCRIPT_START>>>\n"
+            f"{stitched_markdown}\n"
+            "<<<TRANSCRIPT_END>>>"
         )
 
         messages = [
@@ -526,7 +584,12 @@ class Pipeline:
             if isinstance(parsed, list) and parsed:
                 parsed = parsed[0]
         except json.JSONDecodeError:
-            parsed = {}
+            # Don't silently swallow garbage into "no findings" — raise so
+            # the caller emits self_review_error and the user knows they
+            # got first-pass output only.
+            raise ValueError(
+                f"self-review returned unparseable output ({len(response.text)} chars)"
+            ) from None
         if not isinstance(parsed, dict):
             parsed = {}
 
@@ -553,12 +616,48 @@ class Pipeline:
     # ``run_on_transcript`` consumes the event stream and returns the final
     # EditResult — see ``iter_events`` above.
 
-    def _build_user_prompt(self, transcript: NormalizedTranscript) -> str:
+    def _build_user_prompt(
+        self,
+        transcript: NormalizedTranscript,
+        *,
+        chunk_index: int = 1,
+        chunk_total: int = 1,
+    ) -> str:
+        # L2 head/tail trimming must only fire on the actual head/tail of
+        # the recording. On middle chunks the "start" is mid-conversation —
+        # trimming it would delete real content.
+        if chunk_total <= 1:
+            position_note = ""
+        else:
+            is_first = chunk_index == 1
+            is_last = chunk_index == chunk_total
+            if is_first:
+                scope = (
+                    "This is the FIRST chunk: L2 may trim opening pleasantries "
+                    "at the START, but the end of this chunk is mid-conversation "
+                    "— do NOT trim anything from the end."
+                )
+            elif is_last:
+                scope = (
+                    "This is the LAST chunk: L2 may trim closing farewells at "
+                    "the END, but the start of this chunk is mid-conversation "
+                    "— do NOT trim anything from the start."
+                )
+            else:
+                scope = (
+                    "This is a MIDDLE chunk: both its start and end are "
+                    "mid-conversation. L2 head/tail trimming does NOT apply — "
+                    "only strip embedded AI-summary blocks if present."
+                )
+            position_note = (
+                f"\n\nChunk position: {chunk_index} of {chunk_total}. {scope}"
+            )
         return (
             "Apply the layered edit pipeline (L1 through L6, including L3.5) to the transcript "
             "below. Output the cleaned markdown transcript first, then the line "
             f"`{CHANGELOG_DELIMITER}` on its own line, then the JSON change log, then the line "
-            f"`{SUGGESTIONS_DELIMITER}`, then the JSON list of library suggestions.\n\n"
+            f"`{SUGGESTIONS_DELIMITER}`, then the JSON list of library suggestions."
+            f"{position_note}\n\n"
             "Raw transcript:\n\n"
             "```\n"
             f"{transcript.to_markdown()}\n"
@@ -598,36 +697,6 @@ class Pipeline:
         briefing_speaker_lines: list[str] = []
         max_term_lines = 60
 
-        # PRIMER: dump the full vocabulary (canonical + every alias) at the
-        # top of the library context. Without this, if the transcript says
-        # "Tabbey" (a NEW misspelling) and the library only has "Tabby" as
-        # alias of "Tavily", the entity-matcher below would miss it. With
-        # the full vocab primed, the model can do the phonetic match
-        # itself. Capped at 200 lines to bound prompt size — that's enough
-        # for most working libraries without blowing the context budget.
-        vocab_lines: list[str] = []
-        try:
-            all_terms = self.library.list_terms(limit=200)
-        except Exception:
-            all_terms = []
-        for t in all_terms:
-            if t.get("status") == "deprecated":
-                continue
-            canonical = t.get("canonical")
-            if not canonical:
-                continue
-            aliases = t.get("aliases") or []
-            alias_str = ", ".join(f"`{a}`" for a in aliases) if aliases else "—"
-            type_str = f" [{t.get('type')}]" if t.get("type") else ""
-            vocab_lines.append(f"- **{canonical}**{type_str} ← {alias_str}")
-        if vocab_lines:
-            sections.append(
-                "Your full vocabulary (canonical ← known ASR variants). "
-                "Watch for any of these forms — AND any phonetic neighbours "
-                "of these canonicals — in the transcript:\n"
-                + "\n".join(vocab_lines)
-            )
-
         speaker_lines: list[str] = []
         for spk in transcript.detected_speakers:
             hit = self.library.lookup_speaker(spk)
@@ -639,7 +708,8 @@ class Pipeline:
         if speaker_lines:
             sections.append("Known speakers (from your library):\n" + "\n".join(speaker_lines))
 
-        # Walk transcript text first — that's where the real ASR mistakes are.
+        # Pass 1 — entities actually present in this chunk (or the briefing).
+        # These get the high-emphasis, context-specific lines.
         for source_text in (transcript.to_markdown(), self.briefing_context or ""):
             if not source_text:
                 continue
@@ -677,6 +747,41 @@ class Pipeline:
             sections.append(
                 "Speakers mentioned in context, found in your library:\n"
                 + "\n".join(briefing_speaker_lines)
+            )
+
+        # Pass 2 — VOCAB PRIMER: the rest of the vocabulary (canonical +
+        # every alias) so the model can phonetic-match NEW misspellings the
+        # regex extractor can't catch (transcript says "Tabbey", library
+        # only knows "Tabby" → "Tavily"). Filter deprecated BEFORE the cap
+        # so dead entries don't consume slots, rank by usage so a large
+        # library keeps its most load-bearing terms, and exclude canonicals
+        # already emphasised in Pass 1 to avoid paying for them twice.
+        vocab_lines: list[str] = []
+        try:
+            all_terms = self.library.list_terms(limit=500)
+        except Exception:
+            all_terms = []
+        active_terms = [
+            t
+            for t in all_terms
+            if t.get("status") != "deprecated"
+            and t.get("canonical")
+            and t["canonical"] not in seen_canonicals
+        ]
+        active_terms.sort(
+            key=lambda t: (-(t.get("times_used") or 0), str(t["canonical"]).lower())
+        )
+        for t in active_terms[:200]:
+            aliases = t.get("aliases") or []
+            alias_str = ", ".join(f"`{a}`" for a in aliases) if aliases else "—"
+            type_str = f" [{t.get('type')}]" if t.get("type") else ""
+            vocab_lines.append(f"- **{t['canonical']}**{type_str} ← {alias_str}")
+        if vocab_lines:
+            sections.append(
+                "Your full vocabulary (canonical ← known ASR variants). "
+                "Watch for any of these forms — AND any phonetic neighbours "
+                "of these canonicals — in the transcript:\n"
+                + "\n".join(vocab_lines)
             )
 
         if runtime_mappings:

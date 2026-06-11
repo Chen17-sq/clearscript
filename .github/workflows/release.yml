@@ -23,10 +23,18 @@ jobs:
       - name: Build clearscript.skill bundle
         run: bash scripts/build_skill.sh
 
+      - name: Verify all release artifacts exist
+        run: |
+          ls -la dist/
+          test -n "$(ls dist/*.whl 2>/dev/null)" || { echo "::error::wheel missing from dist/"; exit 1; }
+          test -n "$(ls dist/*.tar.gz 2>/dev/null)" || { echo "::error::sdist missing from dist/"; exit 1; }
+          test -f dist/clearscript.skill || { echo "::error::skill bundle missing from dist/"; exit 1; }
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: dist
+          if-no-files-found: error
           path: |
             dist/*.whl
             dist/*.tar.gz
@@ -50,6 +58,7 @@ jobs:
             dist/*.whl
             dist/*.tar.gz
             dist/clearscript.skill
+          fail_on_unmatched_files: true
           generate_release_notes: true
           body: |
             ## Install

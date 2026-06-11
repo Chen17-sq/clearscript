@@ -6,7 +6,10 @@ from clearscript.core.cost import actual_cost, estimate_cost, list_known_models
 
 
 def test_anthropic_opus_estimate_is_in_expected_range() -> None:
-    # 10k input tokens via Opus: input ~$0.15, output ~$0.75 — total ~$0.90
+    # 10k transcript tokens via Opus. The estimate now includes per-chunk
+    # system-prompt overhead (~6k/chunk × 3 chunks) and the self-review
+    # second pass (×1.35), so the honest total is ~$2 — the old ~$0.90
+    # figure was the systematic undercount users complained about.
     transcript = "X" * 40_000  # ~10k tokens (chars/4)
     est = estimate_cost(
         transcript_text=transcript,
@@ -14,7 +17,7 @@ def test_anthropic_opus_estimate_is_in_expected_range() -> None:
         model="claude-opus-4-7",
     )
     assert est.pricing_known
-    assert 0.5 < est.total_cost_usd < 1.5  # generous window
+    assert 1.2 < est.total_cost_usd < 3.5
     assert est.input_tokens > 8000
 
 

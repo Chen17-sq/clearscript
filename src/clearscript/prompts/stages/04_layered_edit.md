@@ -94,7 +94,7 @@ The change log entries look like this:
   {
     "layer": "L3",
     "old": "MAM-9",
-    "new": "Mem9",
+    "new": "Mem0",
     "reason": "library exact match (asr-corrections)",
     "confidence": 0.99
   },

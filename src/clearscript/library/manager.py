@@ -38,7 +38,14 @@ class Library:
     def __init__(self, path: Path) -> None:
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self.path, isolation_level=None)
+        # check_same_thread=False: the SSE endpoints hand sync generators to
+        # Starlette, which drives each next() on a threadpool worker — calls
+        # on the same Library instance can land on different threads. Access
+        # is still sequential (one generator), so cross-thread use is safe;
+        # without this flag SQLite raises ProgrammingError mid-stream.
+        self._conn = sqlite3.connect(
+            self.path, isolation_level=None, check_same_thread=False
+        )
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._init_schema()
@@ -81,14 +88,25 @@ class Library:
         if row:
             term_id = row["id"]
         else:
-            cur = self._conn.execute(
-                """
-                INSERT INTO terms (canonical, type, domain, definition, scope)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (canonical, type_, domain, definition, scope),
-            )
-            term_id = cur.lastrowid
+            try:
+                cur = self._conn.execute(
+                    """
+                    INSERT INTO terms (canonical, type, domain, definition, scope)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (canonical, type_, domain, definition, scope),
+                )
+                term_id = cur.lastrowid
+            except sqlite3.IntegrityError:
+                # Check-then-insert race: a concurrent request inserted the
+                # same canonical between our SELECT and INSERT. Re-fetch.
+                row = self._conn.execute(
+                    "SELECT id FROM terms WHERE canonical = ? AND scope = ?",
+                    (canonical, scope),
+                ).fetchone()
+                if row is None:
+                    raise
+                term_id = row["id"]
 
         for alias in aliases or []:
             self._conn.execute(
@@ -184,16 +202,37 @@ class Library:
         return None
 
     def search_terms(self, query: str, limit: int = 20) -> list[TermHit]:
-        rows = self._conn.execute(
-            """
-            SELECT t.canonical, '' AS alias, t.confidence, t.domain, t.type
-            FROM terms_fts f
-            JOIN terms t ON t.id = f.rowid
-            WHERE terms_fts MATCH ?
-            LIMIT ?
-            """,
-            (query, limit),
-        ).fetchall()
+        # FTS5 interprets bare input as query syntax — a user typing
+        # `a AND`, `"unclosed`, or `term-` gets an OperationalError. Quote
+        # each whitespace token as a phrase (doubling embedded quotes) so
+        # arbitrary text is always a valid query, and fall back to a LIKE
+        # scan if FTS still balks.
+        tokens = [t.replace('"', '""') for t in query.split() if t]
+        if not tokens:
+            return []
+        fts_query = " ".join(f'"{t}"' for t in tokens)
+        try:
+            rows = self._conn.execute(
+                """
+                SELECT t.canonical, '' AS alias, t.confidence, t.domain, t.type
+                FROM terms_fts f
+                JOIN terms t ON t.id = f.rowid
+                WHERE terms_fts MATCH ?
+                LIMIT ?
+                """,
+                (fts_query, limit),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            like = f"%{query}%"
+            rows = self._conn.execute(
+                """
+                SELECT canonical, '' AS alias, confidence, domain, type
+                FROM terms
+                WHERE canonical LIKE ?
+                LIMIT ?
+                """,
+                (like, limit),
+            ).fetchall()
         return [
             TermHit(
                 canonical=r["canonical"],
@@ -211,8 +250,11 @@ class Library:
                 "SELECT canonical, '' as alias, confidence, domain, type FROM terms WHERE status != 'deprecated'"
             ).fetchall()
         else:
+            # Parenthesize the OR: SQL AND binds tighter, so the unparenthesized
+            # version returned every deprecated NULL-domain term.
             rows = self._conn.execute(
-                "SELECT canonical, '' as alias, confidence, domain, type FROM terms WHERE domain IS NULL OR domain = ? AND status != 'deprecated'",
+                "SELECT canonical, '' as alias, confidence, domain, type FROM terms "
+                "WHERE (domain IS NULL OR domain = ?) AND status != 'deprecated'",
                 (domain,),
             ).fetchall()
         return [
@@ -717,6 +759,9 @@ class Library:
             raise ValueError(
                 "import payload missing 'format: clearscript-library-export' marker"
             )
+        for key in ("terms", "speakers", "edit_patterns", "negatives"):
+            if key in payload and not isinstance(payload[key], list):
+                raise ValueError(f"import payload field {key!r} must be a list")
 
         result = {
             "terms_added": 0,
@@ -729,6 +774,9 @@ class Library:
         }
 
         for t in payload.get("terms", []):
+            if not isinstance(t, dict):
+                result["skipped"] += 1
+                continue
             canonical = (t.get("canonical") or "").strip()
             if not canonical:
                 result["skipped"] += 1
@@ -736,18 +784,40 @@ class Library:
             existing = self._conn.execute(
                 "SELECT id FROM terms WHERE canonical = ?", (canonical,)
             ).fetchone()
-            self.add_term(
+            term_id = self.add_term(
                 canonical=canonical,
                 type_=t.get("type"),
                 domain=t.get("domain"),
                 aliases=t.get("aliases", []) or [],
+                definition=t.get("definition"),
             )
+            # Preserve the curation state the exporter recorded — without
+            # this, confirmed/verified terms round-trip back to 'proposed'
+            # and the receiving user loses all the confidence the source
+            # library had built up.
+            status = t.get("status")
+            notes = t.get("notes")
+            if (status and status != "proposed") or notes:
+                self.update_term(
+                    term_id,
+                    status=status if status and status != "proposed" else None,
+                    notes=notes,
+                )
+            confidence = t.get("confidence")
+            if isinstance(confidence, (int, float)) and not existing:
+                self._conn.execute(
+                    "UPDATE terms SET confidence = ? WHERE id = ?",
+                    (float(confidence), term_id),
+                )
             if existing:
                 result["terms_merged"] += 1
             else:
                 result["terms_added"] += 1
 
         for s in payload.get("speakers", []):
+            if not isinstance(s, dict):
+                result["skipped"] += 1
+                continue
             cn = (s.get("canonical_name") or "").strip()
             dl = (s.get("display_label") or "").strip()
             if not cn or not dl:
@@ -768,6 +838,9 @@ class Library:
                 result["speakers_added"] += 1
 
         for p in payload.get("edit_patterns", []):
+            if not isinstance(p, dict):
+                result["skipped"] += 1
+                continue
             title = (p.get("title") or "").strip()
             trigger = (p.get("trigger_desc") or "").strip()
             action = (p.get("action") or "").strip()
@@ -784,6 +857,9 @@ class Library:
             result["patterns_added"] += 1
 
         for n in payload.get("negatives", []):
+            if not isinstance(n, dict):
+                result["skipped"] += 1
+                continue
             text = (n.get("text") or "").strip()
             if not text:
                 result["skipped"] += 1
